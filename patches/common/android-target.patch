@@ -1,5 +1,5 @@
 diff --git a/packages/opencode/script/build.ts b/packages/opencode/script/build.ts
-index ce45f77..5276428 100755
+index ce45f77..5290f8c 100755
 --- a/packages/opencode/script/build.ts
 +++ b/packages/opencode/script/build.ts
 @@ -55,6 +55,7 @@ const allTargets: {
@@ -50,16 +50,7 @@ index ce45f77..5276428 100755
        outfile: `dist/${name}/bin/opencode`,
        execArgv: [`--user-agent=opencode/${Script.version}`, "--use-system-ca", "--"],
        windows: {},
-@@ -196,13 +207,14 @@ for (const item of targets) {
-       OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + treeSitterWorkerPath,
-       OPENCODE_WORKER_PATH: workerPath,
-       OPENCODE_CHANNEL: `'${Script.channel}'`,
--      OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",
--      ...(item.os === "linux" ? { "process.env.OPENTUI_LIBC": JSON.stringify(item.abi ?? "glibc") } : {}),
-+      OPENCODE_LIBC: item.os === "linux" && !item.android ? `'${item.abi ?? "glibc"}'` : item.android ? `'bionic'` : "",
-+      ...(item.os === "linux" && !item.android ? { "process.env.OPENTUI_LIBC": JSON.stringify(item.abi ?? "glibc") } : {}),
-+      ...(item.android ? { "process.env.OPENTUI_LIBC": JSON.stringify("bionic") } : {}),
-     },
+@@ -202,7 +213,7 @@ for (const item of targets) {
    })
  
    // Smoke test: only run if binary is for current platform
@@ -68,11 +59,3 @@ index ce45f77..5276428 100755
      const binaryPath = `dist/${name}/bin/opencode`
      console.log(`Running smoke test: ${binaryPath} --version`)
      try {
-@@ -224,6 +236,7 @@ for (const item of targets) {
-         os: [item.os],
-         cpu: [item.arch],
-         ...(item.abi ? { libc: [item.abi] } : {}),
-+        ...(item.android ? { libc: ["bionic"] } : {}),
-       },
-       null,
-       2,
