@@ -36,12 +36,7 @@ fi
 
 cd "${WORKDIR}"
 
-# Apply patches
-if [ -d "${SCRIPT_DIR}/patches/common" ]; then
-  for patch in "${SCRIPT_DIR}/patches/common"/*.patch; do
-    [ -f "$patch" ] && git apply "$patch" || true
-  done
-fi
+# Apply variant-specific patches only (android target is already in upstream)
 if [ -d "${SCRIPT_DIR}/patches/apt" ]; then
   for patch in "${SCRIPT_DIR}/patches/apt"/*.patch; do
     [ -f "$patch" ] && git apply "$patch" || true
@@ -50,7 +45,8 @@ fi
 
 # Install Bun on host for cross-compilation
 echo "Installing host Bun..."
-curl -fL "https://github.com/oven-sh/bun/releases/latest/download/bun-linux-x64.tar.gz" | tar -xz -C /tmp
+BUN_VERSION="bun-v1.4.0"
+curl -fL "https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/bun-linux-x64.tar.gz" | tar -xz -C /tmp
 export PATH="/tmp/bun-linux-x64:${PATH}"
 
 # Install dependencies for cross-compilation

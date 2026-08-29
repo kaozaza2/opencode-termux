@@ -32,12 +32,7 @@ fi
 
 cd "${WORKDIR}"
 
-# Apply patches
-if [ -d "${SCRIPT_DIR}/patches/common" ]; then
-  for patch in "${SCRIPT_DIR}/patches/common"/*.patch; do
-    [ -f "$patch" ] && git apply "$patch" || true
-  done
-fi
+# Apply variant-specific patches only (android target is already in upstream)
 if [ -d "${SCRIPT_DIR}/patches/pacman" ]; then
   for patch in "${SCRIPT_DIR}/patches/pacman"/*.patch; do
     [ -f "$patch" ] && git apply "$patch" || true
@@ -62,7 +57,8 @@ case "${BUN_ARCH}" in
     ;;
 esac
 
-curl -fL "https://github.com/oven-sh/bun/releases/latest/download/bun-${BUN_TARGET}.tar.gz" | tar -xz -C /tmp
+BUN_VERSION="bun-v1.4.0"
+curl -fL "https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/bun-${BUN_TARGET}.tar.gz" | tar -xz -C /tmp
 export PATH="/tmp/bun-${BUN_TARGET}:${PATH}"
 
 # Install dependencies with Bun (cross-compile for target arch)
