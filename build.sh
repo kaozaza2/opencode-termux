@@ -100,6 +100,89 @@ ensure_bun() {
   echo "Using $(bun --version) from ${bun_bin}"
 }
 
+# script/build.ts installs the native deps (--os="*" --cpu="*") right before it
+# compiles. Running the exact same installs here first makes those later runs
+# no-ops: they must NOT re-extract @opentui/core from the bun store and undo the
+# bionic fixes applied by prepare_opentui_android.
+prewarm_native_deps() {
+  local core parcel fff
+  core="$(bun -e 'console.log(require("./packages/opencode/package.json").dependencies["@opentui/core"])')"
+  parcel="$(bun -e 'console.log(require("./packages/opencode/package.json").dependencies["@parcel/watcher"])')"
+  fff="$(bun -e 'console.log(require("./packages/opencode/package.json").dependencies["@ff-labs/fff-bun"])')"
+  bun install --os="*" --cpu="*" "@opentui/core@${core}"
+  bun install --os="*" --cpu="*" "@parcel/watcher@${parcel}"
+  bun install --os="*" --cpu="*" "@ff-labs/fff-bun@${fff}"
+}
+
+# Two things stand between a cross-compiled android binary and a TUI that runs
+# on bionic:
+#
+# 1. The resolver. Bun 1.4.0 bakes process.platform as "android" into a
+#    --compile binary and ignores a process.platform define, so @opentui/core's
+#    getCurrentNodeAssetTarget() throws "Unsupported OpenTUI Node asset target:
+#    android-arm64" and its import switch never matches. Normalise android to
+#    linux in the exact places the resolver decides.
+#
+# 2. The render library. The npm @opentui/core-linux-arm64 libopentui.so is
+#    glibc (needs libm.so.6/libc.so.6/libdl.so.2) and cannot dlopen on bionic.
+#    Swap in the bionic build vendored in this repo (needs libm.so/libc.so,
+#    which Termux provides).
+prepare_opentui_android() {
+  echo "=== Preparing @opentui/core for bionic (android == linux) ==="
+
+  python3 - "${SCRIPT_DIR}" <<'PY'
+import glob, os, sys
+root = sys.argv[1]
+chunks = glob.glob(os.path.join(root, "opencode", "node_modules", ".bun",
+                                "*@opentui+core*", "node_modules", "@opentui",
+                                "core", "chunk-bun-*.js"))
+# Only the chunk that implements the native-lib resolver needs the
+# android==linux normalisation. Other @opentui/core chunks (renderer, workers)
+# never select a native asset and behave fine with process.platform="android".
+chunks = [c for c in chunks if "getCurrentNodeAssetTarget" in open(c, errors="ignore").read()]
+if not chunks:
+    print("ERROR: @opentui/core resolver chunk (chunk-bun-*.js) not found in bun store", file=sys.stderr)
+    sys.exit(1)
+for c in chunks:
+    s = open(c).read()
+    if "const isLinuxLike = process.platform === \"linux\" || process.platform === \"android\";" in s:
+        print(f"resolver already patched: {c}")
+        continue
+    n = s
+    n = n.replace(
+        "function getCurrentNodeAssetTarget() {\n  const libc = process.env.OPENTUI_LIBC;",
+        "function getCurrentNodeAssetTarget() {\n  const libc = process.env.OPENTUI_LIBC;\n  const isLinuxLike = process.platform === \"linux\" || process.platform === \"android\";",
+        1)
+    n = n.replace(
+        'if (process.platform === "linux" && libc !== undefined',
+        'if (isLinuxLike && libc !== undefined', 1)
+    n = n.replace(
+        "    platform: process.platform,",
+        "    platform: isLinuxLike ? \"linux\" : process.platform,", 1)
+    n = n.replace(
+        '...process.platform === "linux" && libc === "musl"',
+        '...isLinuxLike && libc === "musl"', 1)
+    n = n.replace(
+        '  if (process.platform === "linux") {',
+        '  if (process.platform === "linux" || process.platform === "android") {', 1)
+    if "process.platform === \"linux\" || process.platform === \"android\"" not in n:
+        print(f"ERROR: failed to patch resolver in {c}", file=sys.stderr)
+        sys.exit(1)
+    open(c, "w").write(n)
+    print(f"patched resolver: {c}")
+PY
+
+  local pkg
+  pkg="$(find "${SCRIPT_DIR}/opencode/node_modules/.bun" -type d \
+    -path '*@opentui+core-linux-arm64@*/node_modules/@opentui/core-linux-arm64' 2>/dev/null | head -1)"
+  if [ -z "${pkg}" ]; then
+    echo "ERROR: @opentui/core-linux-arm64 not found in bun store" >&2
+    exit 1
+  fi
+  cp -f "${SCRIPT_DIR}/vendor/@opentui/core-linux-arm64/libopentui.so" "${pkg}/libopentui.so"
+  echo "Replaced ${pkg}/libopentui.so with the bionic build"
+}
+
 ensure_bun
 
 cd "${WORKDIR}"
@@ -109,6 +192,9 @@ cd "${WORKDIR}"
 # a vite build in packages/app.
 echo "Installing workspace dependencies..."
 bun install
+
+prewarm_native_deps
+prepare_opentui_android
 
 # Note the absence of --single and --skip-install:
 #   --single       restricts the build to the *host* platform/arch, so it would
