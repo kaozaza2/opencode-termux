@@ -1,6 +1,3 @@
-# Patch to add Android (bionic libc) target support to opencode build script
-# This patch adds the android target to the build matrix
-
 --- a/packages/opencode/script/build.ts
 +++ b/packages/opencode/script/build.ts
 @@ -53,6 +53,12 @@ const allTargets: {

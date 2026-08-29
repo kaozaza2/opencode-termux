@@ -62,7 +62,7 @@ case "${BUN_ARCH}" in
     ;;
 esac
 
-curl -fsSL "https://github.com/oven-sh/bun/releases/latest/download/bun-${BUN_TARGET}.tar.gz" | tar -xz -C /tmp
+curl -fL "https://github.com/oven-sh/bun/releases/latest/download/bun-${BUN_TARGET}.tar.gz" | tar -xz -C /tmp
 export PATH="/tmp/bun-${BUN_TARGET}:${PATH}"
 
 # Install dependencies with Bun (cross-compile for target arch)

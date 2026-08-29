@@ -50,7 +50,7 @@ fi
 
 # Install Bun on host for cross-compilation
 echo "Installing host Bun..."
-curl -fsSL "https://github.com/oven-sh/bun/releases/latest/download/bun-linux-x64.tar.gz" | tar -xz -C /tmp
+curl -fL "https://github.com/oven-sh/bun/releases/latest/download/bun-linux-x64.tar.gz" | tar -xz -C /tmp
 export PATH="/tmp/bun-linux-x64:${PATH}"
 
 # Install dependencies for cross-compilation
