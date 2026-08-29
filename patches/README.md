@@ -1,35 +1,44 @@
 # Patches Directory
 
-This directory contains patches that are applied to the opencode source before building.
-
-## Structure
+Patches applied to the opencode source before building.
 
 ```
 patches/
-├── common/          # Applied to both pacman and apt variants
-│   ├── android-target.patch    # Adds Android/bionic target to build script
-│   └── install-termux.patch    # Adds Termux detection to install script
-├── pacman/          # Applied only to pacman variant (glibc + Bun)
-└── apt/             # Applied only to apt variant (bionic libc)
+├── *.patch          # applied first
+└── common/*.patch   # applied second
 ```
 
-## How to Add Patches
+There are no variant-specific directories: a single build produces the one
+bionic binary that both the apt and pacman variants ship, so there is nothing to
+vary. The directory is currently empty — see below.
 
-1. Make changes to the opencode source locally
-2. Generate a patch:
-   ```bash
-   cd opencode
-   git diff > ../patches/common/my-change.patch
-   ```
-3. Or for variant-specific patches:
-   ```bash
-   git diff > ../patches/pacman/my-change.patch
-   git diff > ../patches/apt/my-change.patch
-   ```
+## How to add a patch
 
-## Patch Application Order
+```bash
+cd opencode
+git diff > ../patches/common/my-change.patch
+```
 
-1. Common patches (applied first)
-2. Variant-specific patches (pacman or apt)
+Generate patches with `git diff` against the actual source. Hand-written or
+model-generated diffs tend to have hunk headers whose line counts do not match
+their bodies, which `git apply` rejects as `corrupt patch`.
 
-Patches are applied with `git apply` and failures are ignored (using `|| true`) to allow optional patches.
+## Application is strict
+
+The workflow applies patches with a bare `git apply` and lets failures fail the
+build. A patch that no longer applies is a signal that upstream moved, not
+something to swallow — silently ignoring failures is how this repo ended up
+shipping two patches that had never once applied.
+
+## Removed patches
+
+Both previous patches were deleted after being found redundant *and* corrupt:
+
+- `android-target.patch` — added the `linux/arm64` android target to
+  `script/build.ts`. Upstream `dev` already has the target entry, the
+  `compileTarget` android branch, the `!item.android` smoke-test guard, and
+  `libc: ["bionic"]`.
+- `install-termux.patch` — added `--binary` and Termux detection to the `install`
+  script. Upstream `dev` already has the `-b, --binary` flag, `binary_path`
+  handling, `install_from_binary`, and `is_termux` detection via
+  `TERMUX_VERSION`, `/data/data/com.termux`, and `uname -o`.
