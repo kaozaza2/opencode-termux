@@ -1,0 +1,69 @@
+# Multi-stage build for opencode-termux
+# Builds both pacman and apt variants for all architectures
+
+FROM ubuntu:24.04 AS base
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    tar \
+    gzip \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# Copy build scripts
+COPY build-pacman.sh build-apt.sh ./
+RUN chmod +x build-pacman.sh build-apt.sh
+
+# Create patches directory structure
+RUN mkdir -p patches/common patches/pacman patches/apt
+
+# ============================================================
+# PACMAN VARIANT BUILDER (uses termux/termux-docker-pacman)
+# ============================================================
+FROM termux/termux-docker-pacman:latest AS pacman-builder
+
+USER system
+
+# Install build dependencies
+RUN pacman -Sy --noconfirm git base-devel 2>&1 | tail -5 || true
+
+WORKDIR /workspace
+
+COPY --from=base /workspace/build-pacman.sh ./
+COPY --from=base /workspace/patches ./patches
+
+RUN chmod +x build-pacman.sh
+
+# Build for all architectures
+RUN ./build-pacman.sh aarch64 arm64 dev
+RUN ./build-pacman.sh arm arm dev
+RUN ./build-pacman.sh amd64 x64 dev
+
+# ============================================================
+# APT VARIANT BUILDER (uses ubuntu with cross-compilation)
+# ============================================================
+FROM ubuntu:24.04 AS apt-builder
+
+WORKDIR /workspace
+
+COPY --from=base /workspace/build-apt.sh ./
+COPY --from=base /workspace/patches ./patches
+
+RUN chmod +x build-apt.sh
+
+# Build for all architectures
+RUN ./build-apt.sh aarch64 arm64 dev
+RUN ./build-apt.sh arm arm dev
+RUN ./build-apt.sh amd64 x64 dev
+
+# ============================================================
+# FINAL STAGE - Collect all artifacts
+# ============================================================
+FROM scratch AS artifacts
+
+COPY --from=pacman-builder /workspace/out/*.tar.gz /
+COPY --from=apt-builder /workspace/out/*.tar.gz /

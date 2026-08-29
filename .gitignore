@@ -1,0 +1,18 @@
+# Build outputs
+out/
+opencode/
+
+# Temporary files
+*.tar.gz
+tmp/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

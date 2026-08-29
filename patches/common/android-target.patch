@@ -1,0 +1,79 @@
+# Patch to add Android (bionic libc) target support to opencode build script
+# This patch adds the android target to the build matrix
+
+--- a/packages/opencode/script/build.ts
++++ b/packages/opencode/script/build.ts
+@@ -53,6 +53,12 @@ const allTargets: {
+     },
+     {
+       os: "linux",
+       arch: "x64",
+       abi: "musl",
+       avx2: false,
+     },
++    {
++      os: "linux",
++      arch: "arm64",
++      android: true,
++    },
+     {
+       os: "darwin",
+       arch: "arm64",
+@@ -150,6 +156,10 @@ const targets = singleFlag
+     item.avx2 === false ? "baseline" : undefined,
+     item.abi === undefined ? undefined : item.abi,
+     item.android ? "android" : undefined,
+   ]
+     .filter(Boolean)
+     .join("-")
+@@ -168,6 +178,10 @@ for (const item of targets) {
+   const bunfsRoot = item.os === "win32" ? "B:/~BUN/root/" : "/$bunfs/root/"
+ 
+   const compileTarget = item.android
++    ? `bun-${item.os}-${item.arch}-android`
++    : name.replace(pkg.name, "bun")
++  const libc = item.android ? "bionic" : item.abi ?? "glibc"
++
++  await Bun.build({
+     conditions: ["bun", "node"],
+     tsconfig: "./tsconfig.json",
+     plugins: [plugin],
+@@ -182,7 +196,11 @@ for (const item of targets) {
+       autoloadPackageJson: true,
+-      target: name.replace(pkg.name, "bun") as any,
++      target: compileTarget as any,
+       outfile: `dist/${name}/bin/opencode`,
+       execArgv: [`--user-agent=opencode/${Script.version}`, "--use-system-ca", "--"],
+       windows: {},
+@@ -198,8 +216,12 @@ for (const item of targets) {
+       FFF_LIBC: JSON.stringify(item.abi === "musl" ? "musl" : "gnu"),
+       OPENCODE_VERSION: `'${Script.version}'`,
+       OPENCODE_MODELS_DEV: generated.modelsData,
+       OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + treeSitterWorkerPath,
+       OPENCODE_WORKER_PATH: workerPath,
+       OPENCODE_CHANNEL: `'${Script.channel}'`,
+-      OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",
+-      ...(item.os === "linux" ? { "process.env.OPENTUI_LIBC": JSON.stringify(item.abi ?? "glibc") } : {}),
++      OPENCODE_LIBC: `'${libc}'`,
++      "process.env.OPENTUI_LIBC": JSON.stringify(libc),
+     },
+   })
+@@ -215,7 +237,7 @@ for (const item of targets) {
+   // Smoke test: only run if binary is for current platform
+-  if (item.os === process.platform && item.arch === process.arch && !item.abi) {
++  if (item.os === process.platform && item.arch === process.arch && !item.abi && !item.android) {
+     const binaryPath = `dist/${name}/bin/opencode`
+     console.log(`Running smoke test: ${binaryPath} --version`)
+     try {
+@@ -235,6 +257,9 @@ for (const item of targets) {
+       {
+         name,
+         version: Script.version,
+         preferUnplugged: true,
+         os: [item.os],
+         cpu: [item.arch],
+         ...(item.abi ? { libc: [item.abi] } : {}),
++        ...(item.android ? { libc: ["bionic"] } : {}),
+       },
+       null,
+       2,
