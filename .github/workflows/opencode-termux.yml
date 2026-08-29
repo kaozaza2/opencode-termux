@@ -66,12 +66,21 @@ jobs:
         working-directory: opencode-termux
         run: |
           shopt -s nullglob
-          # A single build produces both the glibc and bionic binaries, so
-          # patches can no longer be scoped per variant.
+          # A single build produces the one bionic binary both variants ship, so
+          # patches are no longer scoped per variant.
+          count=0
           for patch in patches/*.patch patches/common/*.patch; do
             echo "Applying ${patch}"
             git -C opencode apply "../${patch}"
+            count=$((count + 1))
           done
+          echo "Applied ${count} patch(es)"
+          # android-target.patch is not optional: upstream has no bionic target,
+          # so an empty patch set silently yields a build with nothing to ship.
+          if [ "$count" -eq 0 ]; then
+            echo "ERROR: no patches found; the android target would be missing" >&2
+            exit 1
+          fi
 
       # node-gyp (invoked by bun install for native postinstall scripts) needs
       # Node >= 22; the runner image can ship an older one on PATH.

@@ -112,3 +112,18 @@ OPENCODE_VERSION="${VERSION}" bun run packages/opencode/script/build.ts ${BUILD_
 
 echo "=== Build complete ==="
 ls -la packages/opencode/dist/
+
+# The android target exists only because patches/common/android-target.patch adds
+# it -- upstream opencode has no bionic target at all. If that patch ever stops
+# applying, all twelve other targets still build and this script would exit 0
+# with nothing to ship. That is exactly how the first green-but-empty build
+# happened, so assert the one output that matters.
+ANDROID_BINARY="packages/opencode/dist/opencode-linux-arm64-android/bin/opencode"
+if [ ! -f "${ANDROID_BINARY}" ]; then
+  echo "ERROR: ${ANDROID_BINARY} was not produced." >&2
+  echo "The android target is added by patches/common/android-target.patch." >&2
+  echo "Verify that patch applied -- upstream has no bionic target of its own." >&2
+  exit 1
+fi
+
+echo "Android binary: $(ls -la "${ANDROID_BINARY}")"
