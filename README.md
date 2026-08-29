@@ -58,6 +58,26 @@ branch; the redundant compiles are the cheaper trade.
 `packages/app`) if you need a faster or more reliable build, at the cost of
 `opencode serve`'s browser UI.
 
+### The Bun version is a runtime choice
+
+`bun build --compile` embeds the compiling Bun's runtime into the binary, so
+`BUN_VERSION` in `build.sh` decides what actually runs on your phone.
+
+It is pinned to **1.4.0**, deliberately *not* to opencode's `packageManager`
+field (1.3.14). A 1.3.14-compiled binary segfaults at startup on arm64 bionic,
+inside the JS parser lowering `using` declarations
+(`js_parser ... LowerUsingDeclarationsContext.finalize`, reported as
+`pre-init`), while the same device runs Bun 1.4.0 fine.
+
+`script/build.ts` independently enforces a `^<packageManager>` range and fails
+with a clear message if the pin ever drifts outside it.
+
+```bash
+BUN_VERSION=1.4.1 ./build.sh <version>   # bisect a Bun regression
+```
+
+The workflow exposes the same knob as a `bun_version` workflow_dispatch input.
+
 ## GitHub Actions
 
 `.github/workflows/opencode-termux.yml` builds once, then packages both variants

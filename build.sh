@@ -23,6 +23,19 @@ set -euo pipefail
 
 VERSION="${1:?usage: build.sh <version>}"
 
+# The Bun that compiles is the Bun that gets embedded: `bun build --compile`
+# bakes its own runtime into the binary. So this version is a *runtime* choice
+# for the shipped binary, not just a build-tool choice.
+#
+# Deliberately NOT opencode's packageManager pin (1.3.14). That runtime
+# segfaults at startup on arm64 bionic, inside the JS parser lowering `using`
+# declarations (js_parser P.zig LowerUsingDeclarationsContext.finalize), before
+# the runtime finishes initialising. 1.4.0 does not.
+#
+# Must still satisfy the `^<packageManager>` range that script/build.ts enforces;
+# it throws with a clear message if not. Override to bisect Bun regressions.
+BUN_VERSION="${BUN_VERSION:-1.4.0}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="${SCRIPT_DIR}/opencode"
 
@@ -38,16 +51,18 @@ echo "=== Building opencode ${VERSION} (all targets) ==="
 # refuses to run under anything outside ^<packageManager version>.
 ensure_bun() {
   if command -v bun >/dev/null 2>&1; then
-    echo "Using $(bun --version) from $(command -v bun)"
+    local have
+    have="$(bun --version)"
+    echo "Using bun ${have} from $(command -v bun)"
+    if [ "${have}" != "${BUN_VERSION}" ]; then
+      echo "WARNING: bun ${have} on PATH but this build targets ${BUN_VERSION}." >&2
+      echo "The binary embeds the runtime of whichever bun compiles it." >&2
+    fi
     return
   fi
 
   local want os cpu asset url tmp bun_bin
-  want="$(sed -n 's/.*"packageManager"[[:space:]]*:[[:space:]]*"bun@\([^"]*\)".*/\1/p' "${WORKDIR}/package.json")"
-  if [ -z "${want}" ]; then
-    echo "ERROR: could not read packageManager from ${WORKDIR}/package.json" >&2
-    exit 1
-  fi
+  want="${BUN_VERSION}"
 
   case "$(uname -s)" in
     Linux) os="linux" ;;

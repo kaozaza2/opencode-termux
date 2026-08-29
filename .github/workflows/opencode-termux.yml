@@ -21,12 +21,20 @@ on:
         required: false
         type: boolean
         default: false
+      bun_version:
+        description: 'Bun version to compile with (its runtime is embedded in the binary)'
+        required: false
+        default: '1.4.0'
 
 permissions:
   contents: read
 
 env:
   OPENCODE_REPO: 'https://github.com/anomalyco/opencode.git'
+  # `bun build --compile` embeds the compiling Bun's runtime, so this is the
+  # runtime the Termux binary ships with. 1.3.14 (opencode's packageManager pin)
+  # segfaults at startup on arm64 bionic in the JS parser's `using` lowering.
+  BUN_VERSION: ${{ github.event.inputs.bun_version || '1.4.0' }}
 
 jobs:
   # Bun cross-compiles every target from a single x64 Linux host, which is how
@@ -92,9 +100,10 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          # Pins to the packageManager field; script/build.ts refuses to run
-          # under a Bun outside that semver range.
-          bun-version-file: opencode-termux/opencode/package.json
+          # Not bun-version-file: that resolves opencode's packageManager pin,
+          # whose runtime crashes on bionic. script/build.ts still enforces its
+          # own ^<packageManager> range and errors clearly if this drifts out.
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Cache Bun dependencies
         uses: actions/cache@v4
@@ -105,6 +114,8 @@ jobs:
 
       - name: Build
         working-directory: opencode-termux
+        env:
+          BUN_VERSION: ${{ env.BUN_VERSION }}
         run: ./build.sh "${{ steps.opencode.outputs.version }}"
 
       # build.ts has no target filter, so the glibc/musl/darwin/windows targets
