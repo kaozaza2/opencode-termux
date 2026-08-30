@@ -54,9 +54,16 @@ emit an arm64 binary. So every target is compiled and all but the android one is
 discarded. Narrowing it would mean carrying a patch against a moving upstream
 branch; the redundant compiles are the cheaper trade.
 
-`SKIP_WEB_UI=1 ./build.sh <version>` drops the embedded web UI (a vite build of
-`packages/app`) if you need a faster or more reliable build, at the cost of
-`opencode serve`'s browser UI.
+### The web UI is skipped by default
+
+The embedded web UI (a vite build of `packages/app`) costs tens of MB and only
+`opencode serve`'s browser UI needs it, so it is **not** embedded by default —
+this is the main reason the shipped binary stays around 150 MB instead of
+175–185 MB. `opencode serve` still works; its browser UI just won't load.
+
+Embed it back in with `BUILD_WEB_UI=1 ./build.sh <version>` (or the legacy
+`SKIP_WEB_UI=0`), and the workflow exposes the same choice as the
+`with_web_ui` workflow_dispatch input.
 
 ### The Bun version is a runtime choice
 

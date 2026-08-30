@@ -25,6 +25,11 @@ on:
         description: 'Bun version to compile with (its runtime is embedded in the binary)'
         required: false
         default: '1.4.0'
+      with_web_ui:
+        description: 'Embed the web UI (adds ~30 MB to the binary for `opencode serve`)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -116,6 +121,9 @@ jobs:
         working-directory: opencode-termux
         env:
           BUN_VERSION: ${{ env.BUN_VERSION }}
+          # The web UI is embedded only when opted in: it adds tens of MB to the
+          # binary and only `opencode serve`'s browser UI needs it.
+          BUILD_WEB_UI: ${{ github.event.inputs.with_web_ui || '0' }}
         run: ./build.sh "${{ steps.opencode.outputs.version }}"
 
       # build.ts has no target filter, so the glibc/musl/darwin/windows targets
@@ -194,7 +202,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
-          TAG="v${VERSION}-termux"
+          TAG="${VERSION}-termux"
           # merge-multiple flattens everything into artifacts/, so no ** needed.
           ls -la artifacts/
           if gh release view "$TAG" >/dev/null 2>&1; then

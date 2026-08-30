@@ -203,10 +203,15 @@ prepare_opentui_android
 #                  native deps (@opentui/core, @parcel/watcher, @ff-labs/fff-bun)
 #                  for every target, which cross-compiling requires.
 # script/build.ts takes no --target flag; targets come from its allTargets list.
+# The embedded web UI (a vite build of packages/app) is skipped by default:
+# it adds tens of MB to the shipped binary and only `opencode serve`'s browser
+# UI needs it. Allocate BUILD_WEB_UI=1 (or the legacy SKIP_WEB_UI=0) to embed.
 echo "Compiling all targets..."
 BUILD_ARGS=()
-if [ -n "${SKIP_WEB_UI:-}" ]; then
+if [ "${BUILD_WEB_UI:-0}" != "1" ] && [ "${SKIP_WEB_UI:-1}" != "0" ]; then
   BUILD_ARGS+=(--skip-embed-web-ui)
+else
+  echo "Embedding the web UI (use --skip-embed-web-ui to avoid the size cost)"
 fi
 
 OPENCODE_VERSION="${VERSION}" bun run packages/opencode/script/build.ts ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}
