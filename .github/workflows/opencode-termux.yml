@@ -49,12 +49,6 @@ env:
 jobs:
   build:
     name: Build opencode-linux-arm64-android
-    # ubuntu-latest, not ubuntu-24.04: GitHub supports at most two GA images and
-    # starts deprecating the oldest once a newer one is GA, which 26.04 now is.
-    # Pinning 24.04 here would have pinned the image that is on its way out. This
-    # job runs build.sh directly rather than in Dockerfile.build, so it is the
-    # runner that provides the build tools; latest rolls forward with the runner
-    # images and the build does not depend on an apt version.
     runs-on: ubuntu-latest
     timeout-minutes: 60
     outputs:
