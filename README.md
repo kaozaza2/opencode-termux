@@ -98,9 +98,12 @@ away; that is why CI is now roughly a third of its old cost.
 1. **The resolver.** A Bun android binary reports `process.platform` as
    `"android"`, but `@opentui/core` accepts only `linux`/`darwin`/`win32` and
    throws `Unsupported OpenTUI Node asset target: android-arm64`.
-   `patches/common/opentui-android.patch` pins the value to `"linux"` at bundle
-   time, which reaches the pre-bundled chunks without rewriting files in the bun
-   store.
+   `patches/common/opentui-android.patch` rewrites those reads to `"linux"` in
+   `@opentui/core`'s own chunks from a `Bun.build` plugin. It has to be a plugin:
+   a `define` for `process.platform` is silently ignored, because when bun
+   cross-compiles to android it folds the platform in itself and its constant
+   wins. The build fails if the plugin matches nothing, so an `@opentui/core`
+   that stops reading `process.platform` cannot ship a broken binary.
 
 2. **The render library.** The npm `libopentui.so` is a glibc build needing
    `libm.so.6` / `libc.so.6` / `libdl.so.2` and cannot be `dlopen()`ed on bionic,
@@ -184,6 +187,15 @@ cannot be committed by accident. `build.sh` additionally compares
 `vendor/@opentui/core-linux-arm64/VERSION` against the version the checkout
 resolves and refuses to build on a mismatch, so the failure cannot reach a
 phone.
+
+The blob carries a third constraint that is not about `@opentui/core` at all: it
+is a Zig build, so its `threadlocal` variables need a dynamic linker that
+implements `R_AARCH64_TLSDESC`. Bionic has since Android 11; an older `linker64`
+leaves the descriptors zeroed and the TUI dies with
+`Segmentation fault at address 0x0` on its first write to stdout.
+`termux/termux-docker` ships such a linker, so the TUI cannot be exercised there
+— see [vendor/README.md](vendor/README.md#it-needs-a-loader-that-implements-tlsdesc)
+for the twenty-line reproduction and what a fix would take.
 
 ## GitHub Actions
 

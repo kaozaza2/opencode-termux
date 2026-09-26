@@ -1,16 +1,60 @@
 diff --git a/packages/cli/script/build.ts b/packages/cli/script/build.ts
-index 37726dc..5cf0203 100755
+index 37726dc..fdfdff2 100755
 --- a/packages/cli/script/build.ts
 +++ b/packages/cli/script/build.ts
-@@ -169,6 +169,11 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
-       // FFF_LIBC selects the fff native lib variant: "musl" or "gnu".
-       FFF_LIBC: item.os === "linux" ? `'${item.abi ?? "gnu"}'` : "undefined",
-       ...(item.os === "linux" ? { "process.env.OPENTUI_LIBC": JSON.stringify(item.abi ?? "glibc") } : {}),
-+      // A bun android binary reports process.platform === "android", but
-+      // @opentui/core only accepts "linux" | "darwin" | "win32" and throws
-+      // `Unsupported OpenTUI Node asset target: android-arm64`. Pin the value
-+      // so the bundled resolver picks the linux native asset instead.
-+      ...(item.android ? { "process.platform": JSON.stringify("linux") } : {}),
+@@ -129,6 +129,26 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
+       }))
      },
-   })
+   }
++  // A bun android binary reports process.platform === "android", and
++  // @opentui/core only accepts "linux" | "darwin" | "win32": its native asset
++  // resolver throws `Unsupported OpenTUI Node asset target: android-arm64` and
++  // the render library never loads. A Bun.build `define` for process.platform is
++  // ignored here -- bun's own cross-target platform folding wins -- so rewrite
++  // the reads in @opentui/core's pre-bundled chunks at bundle time instead,
++  // which is the one substitution that reaches a dependency. android is bionic
++  // linux, so "linux" is the value the rest of the chunk expects.
++  const opentuiPlatformInputs = new Set<string>()
++  const opentuiPlatformPlugin: BunPlugin = {
++    name: "opentui-android-platform",
++    setup(build) {
++      build.onLoad({ filter: /@opentui[/\\]core[/\\].*\.js$/ }, async (args) => {
++        const contents = await Bun.file(args.path).text()
++        if (!contents.includes("process.platform")) return undefined
++        opentuiPlatformInputs.add(args.path)
++        return { loader: "js", contents: contents.replace(/\bprocess\.platform\b/g, '"linux"') }
++      })
++    },
++  }
+   const target = targetName(item)
+   const name = target.replace(binary, "cli")
+   const executablePath = await compileExecutable(item)
+@@ -136,7 +156,16 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
+   const result = await Bun.build({
+     entrypoints: ["./src/index.ts"],
+     tsconfig: "./tsconfig.json",
+-    plugins: [appAssetsPlugin, solidPlugin, parcelWatcherPlugin, opencodePtyPlugin, simulationGraphPlugin],
++    plugins: [
++      appAssetsPlugin,
++      solidPlugin,
++      parcelWatcherPlugin,
++      opencodePtyPlugin,
++      simulationGraphPlugin,
++      // Every other plugin is target agnostic; this one would pin darwin and
++      // win32 builds to linux as well.
++      ...(item.android ? [opentuiPlatformPlugin] : []),
++    ],
+     external: ["node-gyp"],
+     format: "esm",
+     minify: true,
+@@ -177,6 +206,10 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
+     process.exit(1)
+   }
+   verifySimulationGraph(simulationInputs)
++  // Without a chunk to rewrite the binary would ship with the TUI unable to
++  // load its render library, so fail here instead of on the device.
++  if (item.android && opentuiPlatformInputs.size === 0)
++    throw new Error("No @opentui/core module read process.platform: the android platform rewrite did not apply")
  
+   await Bun.write(
+     path.join(outdir, name, "package.json"),

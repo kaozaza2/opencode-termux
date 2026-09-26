@@ -52,14 +52,34 @@ nothing is produced. Adds:
 
 ### `opentui-android.patch` — `packages/cli/script/build.ts`
 
-Pins `process.platform` to `"linux"` in the bundle for android targets only. A
-bun android binary reports `process.platform === "android"`, and
-`@opentui/core`'s `getCurrentNodeAssetTarget()` feeds that straight into
+Adds a bundler plugin that pins `process.platform` to `"linux"` inside
+`@opentui/core` for android targets only. A bun android binary reports
+`process.platform === "android"`, and `@opentui/core`'s
+`getCurrentNodeAssetTarget()` feeds that straight into
 `getNativeAssetDescriptor()`, which accepts only `linux`/`darwin`/`win32` and
-otherwise throws `Unsupported OpenTUI Node asset target: android-arm64`. Doing
-it through bun's `define` means the substitution happens at bundle time, so it
-reaches the pre-bundled `chunk-bun-*.js` without rewriting files in the bun
-store. Still required in 0.5.10 — the resolver is unchanged from 0.4.5.
+otherwise throws `Unsupported OpenTUI Node asset target: android-arm64` — which
+is what the TUI dies on, before it draws anything.
+
+**A `Bun.build` `define` does not work here.** `define:
+{ "process.platform": '"linux"' }` leaves the built binary throwing exactly the
+same error: when bun cross-compiles to an android target it folds
+`process.platform` into the constant `"android"` itself, and that wins over the
+user `define`. So the patch substitutes the reads in the dependency's own
+pre-bundled `chunk-bun-*.js` from an `onLoad` hook instead, which is the one
+place the substitution still reaches a dependency. Doing it in the plugin also
+avoids rewriting files in the bun store, which are hardlinks into the global
+cache.
+
+The plugin is added to `plugins` only when `item.android`, because on a darwin
+or win32 build the same rewrite would pin the wrong platform. It records the
+files it touched and the build throws if that set is empty, so an
+`@opentui/core` that stops reading `process.platform` fails the build instead
+of shipping a binary whose TUI cannot start.
+
+The plugin replaces the read everywhere in the package, not only in the
+resolver: `chunk-bun-*.js` also branches on `process.platform` to decide
+whether the renderer may use its stdin thread, and linux is the answer the rest
+of that code expects.
 
 ### `install-termux.patch` — `install`
 

@@ -47,6 +47,46 @@ docker build -t opentui-lib -f Dockerfile.libopentui \
 `DT_NEEDED` of a correct build looks like `libm.so`, `libc.so`, `libdl.so`.
 If you see `libc.so.6` you have a glibc object.
 
+### It needs a loader that implements TLSDESC
+
+This is a Zig build, and Zig gives every `threadlocal var` in an `aarch64` shared
+object an `R_AARCH64_TLSDESC` relocation. This blob has 11 of them, in Zig's
+`std.Io.Threaded.Thread.current`, `std.Thread`'s thread-id and signal-stack
+slots, OpenTUI's yoga measure slots, and the vendored C libraries.
+
+A loader that does not implement `R_AARCH64_TLSDESC` leaves those descriptors
+zeroed, and the first threadlocal access in the object then does `blr` on a null
+resolver: `Segmentation fault at address 0x0`, before any TUI frame. Bionic grew
+TLSDESC in 2019, so Android 11 and newer are fine; an older `linker64` is not.
+`termux/termux-docker` currently ships one that predates it, which is why the
+TUI cannot be exercised in that container — see
+[the sigaction patch](#the-sigaction-patch-is-inert) for what is known and what
+is not.
+
+A twenty-line Zig library is enough to see it, so this is not OpenTUI-specific:
+
+```zig
+threadlocal var counter: u32 = 41;
+export fn bump() u32 { return ++counter; }
+```
+
+```bash
+zig build-lib tls.zig -target aarch64-linux-android -lc -dynamic -fPIC   # R_AARCH64_TLSDESC x2
+```
+
+`dlopen` it and call `bump()`: with a loader that implements TLSDESC it returns
+42, otherwise the process dies on the first call. To tell the two apart without a
+debugger, read the descriptor itself — the linker writes `{resolver, argument}`
+at the address the `adrp`/`ldr` pair points at, and it is still all zeros when
+the relocation was not applied.
+
+If a device turns out to be affected, the fix is to build the blob with no
+`threadlocal` at all, which means patching `std.Io.Threaded`, `std.Thread` and
+`packages/native/src/yoga.zig` in addition to this repository's patches. That
+is not mechanical: making `std.Io.Threaded.Thread.current` a plain global (the
+only one the first stdout write touches) crashes the zig 0.16.0 compiler on this
+target rather than producing a `.so`.
+
 ### How the build gets a bionic libc out of Zig
 
 Zig bundles only glibc and musl, so for `aarch64-linux-android` it reports
@@ -68,6 +108,26 @@ Two further pieces live in `patches/`:
   steps at the merged include dir. This is the only way their `-I` reaches
   translate-c: a module's `include_dirs` do not, which is why `--sysroot` and
   `addSystemIncludePath` alone leave `math.h` and `pthread.h` unfound.
+
+### The sigaction patch is inert
+
+`patches/zig/posix-android-sigaction.patch` compiles, and the blob it produces
+imports `sigaddset`, `sigemptyset`, `sigismember`, `sigpending`, `sigprocmask`
+and `sigtimedwait` — but not `sigaction`:
+
+```bash
+nm -D --undefined-only libopentui.so | grep sigaction   # no output
+```
+
+Zig only type-checks the code a build actually reaches, and a
+`ReleaseFast` android build reaches no `posix.sigaction` at all, so the patch
+changes nothing here. It is also not type-correct when something *does* reach
+it: `std.debug`'s segfault handler calls `posix.sigaction` with a
+`c.common_linux_Sigaction`, which the patch's `linux.sigaction` call cannot
+accept, so a `Debug` or `ReleaseSafe` build of this blob fails to compile while
+the `ReleaseFast` one passes. It is kept only because removing it is a separate
+decision: it may still be load-bearing for a future `@opentui/core` that
+installs a signal handler, and it costs nothing while unreached.
 
 `patches/zig/cache-no-tmpfile.patch` is not part of the android story. Zig's
 build cache creates files with `O_TMPFILE` and hardlinks them into place, and
