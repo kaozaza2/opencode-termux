@@ -49,7 +49,11 @@ env:
 jobs:
   build:
     name: Build opencode-linux-arm64-android
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: this job runs build.sh directly rather than in
+    # Dockerfile.build, so the runner image is the build environment, and a
+    # floating label would let a GitHub-side image change break or alter a build
+    # with no commit to point at. 24.04 is what both Dockerfiles use.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     outputs:
       version: ${{ steps.ref.outputs.version }}
@@ -87,7 +91,7 @@ jobs:
   package:
     name: Package
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout opencode-termux
         uses: actions/checkout@v7
@@ -118,7 +122,7 @@ jobs:
       - build
       - package
     if: github.event_name == 'workflow_dispatch' && inputs.release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
