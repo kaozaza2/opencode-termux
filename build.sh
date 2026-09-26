@@ -79,10 +79,13 @@ ensure_source() {
 }
 
 # Read the pin: @opencode/script enforces ^<packageManager> and it moves.
+# Read it with node, not bun: this runs before bun is installed, and a failing
+# command substitution inside `local` is masked, so `bun -e` here silently
+# yielded an empty version and then 404'd on bun-v/bun-<asset>.zip.
 required_bun_range() {
-  bun -e '
+  node -e '
     const pin = require("./opencode/package.json").packageManager
-    if (!pin?.startsWith("bun@")) { console.error("no bun@ pin"); process.exit(1) }
+    if (!pin?.startsWith("bun@")) { console.error("no bun@ pin: " + pin); process.exit(1) }
     const v = pin.slice(4).split(".").map(Number)
     if (!Number.isFinite(v[0]) || !Number.isFinite(v[1])) { console.error("bad pin: " + pin); process.exit(1) }
     console.log(v.join("."))
@@ -90,7 +93,14 @@ required_bun_range() {
 }
 
 ensure_bun() {
-  local want="${BUN_VERSION:-$(required_bun_range)}"
+  local want="${BUN_VERSION:-}"
+  if [ -z "${want}" ]; then
+    want="$(required_bun_range)" || {
+      echo "ERROR: could not determine the required bun version." >&2
+      echo "       Set BUN_VERSION=<x.y.z>, or use a checkout with a packageManager pin." >&2
+      exit 1
+    }
+  fi
   if command -v bun >/dev/null 2>&1; then
     local have
     have="$(bun --version)"
