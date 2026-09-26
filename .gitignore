@@ -1,6 +1,15 @@
 # Build outputs
 out/
 opencode/
+# A `bun install` run from this directory (rather than from opencode/) drops a
+# node_modules here. Never part of the repo.
+node_modules/
+
+# Zig / opentui native build scratch (scripts/build-libopentui.sh works under
+# /tmp by default, but keep these ignored in case it is pointed here).
+.zig-cache/
+zig-cache/
+zig-out/
 
 # Temporary files
 *.tar.gz

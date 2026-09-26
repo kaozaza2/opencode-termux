@@ -1,77 +1,122 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Cross-compiles every opencode target in a single pass.
+# ./build.sh [version] -- clones opencode, applies patches/, cross-compiles one
+# bionic target. Clones the newest v2.x.y release unless OPENCODE_REF says
+# otherwise; `2.0` and `dev` are v1 lines, `v2` is the branch head.
 #
-# Bun compiles for all supported targets from one x64 Linux host, which is how
-# opencode's own .github/workflows/publish.yml builds its releases. There is no
-# per-architecture build: run this once, then package what you need.
-#
-# Only one output is kept downstream:
-#
-#   packages/opencode/dist/opencode-linux-arm64-android   aarch64, bionic
-#
-# That single binary serves both Termux variants -- stock Termux (apt) and
-# termux-pacman both run on bionic libc. The glibc/musl/darwin/windows targets
-# are compiled and discarded because build.ts takes no target filter; narrowing
-# it would mean carrying a patch against a moving upstream branch.
-#
-# There is deliberately no 32-bit ARM build (Bun ships no armv7 binary) and no
-# x64 bionic build (opencode's allTargets has exactly one android entry).
-#
-# Usage: ./build.sh <version>
+# Env: OPENCODE_REPO OPENCODE_REF VERSION BUN_VERSION BUN_INSTALL_BACKEND
+#      BUILD_WEB_UI=1 SKIP_CLONE=1
 
-VERSION="${1:?usage: build.sh <version>}"
-
-# The Bun that compiles is the Bun that gets embedded: `bun build --compile`
-# bakes its own runtime into the binary. So this version is a *runtime* choice
-# for the shipped binary, not just a build-tool choice.
-#
-# Deliberately NOT opencode's packageManager pin (1.3.14). That runtime
-# segfaults at startup on arm64 bionic, inside the JS parser lowering `using`
-# declarations (js_parser P.zig LowerUsingDeclarationsContext.finalize), before
-# the runtime finishes initialising. 1.4.0 does not.
-#
-# Must still satisfy the `^<packageManager>` range that script/build.ts enforces;
-# it throws with a clear message if not. Override to bisect Bun regressions.
-BUN_VERSION="${BUN_VERSION:-1.4.0}"
+VERSION="${1:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="${SCRIPT_DIR}/opencode"
 
-if [ ! -d "${WORKDIR}" ]; then
-  echo "ERROR: opencode source not found at ${WORKDIR}" >&2
-  exit 1
-fi
+OPENCODE_REPO="${OPENCODE_REPO:-https://github.com/anomalyco/opencode.git}"
+OPENCODE_REF="${OPENCODE_REF:-latest}"
 
-echo "=== Building opencode ${VERSION} (all targets) ==="
+# One target, four names. The last two differ because build.ts derives the dist
+# dir with targetName().replace("opencode","cli") and the installer resolves
+# @opencode/cli-<target> from npm.
+BUILD_TARGET="opencode-linux-arm64-android"
+DIST_NAME="cli-linux-arm64-android"
+ANDROID_BINARY="packages/cli/dist/${DIST_NAME}/bin/opencode"
 
-# Bun is normally provided by oven-sh/setup-bun in CI. Bootstrap it for local
-# runs, pinning to the version opencode's package.json asks for -- script/build.ts
-# refuses to run under anything outside ^<packageManager version>.
+# Only a bionic binary carries this interpreter.
+ANDROID_INTERP="/system/bin/linker64"
+
+BUN_INSTALL_BACKEND="${BUN_INSTALL_BACKEND:-hardlink}"
+
+cd "${SCRIPT_DIR}"
+
+latest_release_ref() {
+  # sort -V so v2.0.10 outranks v2.0.9; ^{} lines are the same tags again.
+  git ls-remote --tags "${OPENCODE_REPO}" 'refs/tags/v2.*' 2>/dev/null |
+    awk '{print $2}' |
+    sed -e 's#^refs/tags/##' -e 's#\^{}$##' |
+    sort -u -V |
+    tail -1
+}
+
+resolve_ref() {
+  if [ "${OPENCODE_REF}" = "latest" ]; then
+    OPENCODE_REF="$(latest_release_ref)"
+    if [ -z "${OPENCODE_REF}" ]; then
+      echo "ERROR: no v2.* tags in ${OPENCODE_REPO}; set OPENCODE_REF=v2." >&2
+      exit 1
+    fi
+  fi
+}
+
+# A 0.0.0-dev- prefix is what opencode's Script helper reads as a preview.
+derive_version() {
+  local tag
+  tag="$(git -C "${WORKDIR}" describe --tags --exact-match 2>/dev/null || true)"
+  if [ -n "${tag}" ]; then
+    printf '%s\n' "${tag#v}"
+  else
+    printf '0.0.0-dev-%s\n' "$(git -C "${WORKDIR}" rev-parse --short HEAD)"
+  fi
+}
+
+ensure_source() {
+  resolve_ref
+  if [ -d "${WORKDIR}/.git" ]; then
+    echo "=== Using existing opencode checkout at ${WORKDIR} ==="
+  else
+    if [ -n "${SKIP_CLONE:-}" ]; then
+      echo "ERROR: no opencode checkout at ${WORKDIR} and SKIP_CLONE is set." >&2
+      exit 1
+    fi
+    echo "=== Cloning opencode ${OPENCODE_REF} ==="
+    git clone --depth 1 --branch "${OPENCODE_REF}" "${OPENCODE_REPO}" opencode
+  fi
+  git -C "${WORKDIR}" log --oneline -1
+  [ -n "${VERSION}" ] || VERSION="$(derive_version)"
+  echo "Building version ${VERSION} from ${OPENCODE_REF}"
+  [ -z "${GITHUB_OUTPUT:-}" ] || echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+}
+
+# Read the pin: @opencode/script enforces ^<packageManager> and it moves.
+required_bun_range() {
+  bun -e '
+    const pin = require("./opencode/package.json").packageManager
+    if (!pin?.startsWith("bun@")) { console.error("no bun@ pin"); process.exit(1) }
+    const v = pin.slice(4).split(".").map(Number)
+    if (!Number.isFinite(v[0]) || !Number.isFinite(v[1])) { console.error("bad pin: " + pin); process.exit(1) }
+    console.log(v.join("."))
+  '
+}
+
 ensure_bun() {
+  local want="${BUN_VERSION:-$(required_bun_range)}"
   if command -v bun >/dev/null 2>&1; then
     local have
     have="$(bun --version)"
-    echo "Using bun ${have} from $(command -v bun)"
-    if [ "${have}" != "${BUN_VERSION}" ]; then
-      echo "WARNING: bun ${have} on PATH but this build targets ${BUN_VERSION}." >&2
-      echo "The binary embeds the runtime of whichever bun compiles it." >&2
+    echo "Using bun ${have} from $(command -v bun) (checkout requires ^${want})"
+    if [ "${have}" != "${want}" ]; then
+      # A different patch inside the range is fine; a different major.minor
+      # would otherwise fail deep inside @opencode/script.
+      if ! bun -e '
+          const [h, w] = process.argv.slice(1).map(s => s.split(".").map(Number))
+          process.exit(h[0] === w[0] && h[1] === w[1] ? 0 : 1)
+        ' "${have}" "${want}" 2>/dev/null; then
+        echo "ERROR: bun ${have} does not satisfy ^${want}." >&2
+        exit 1
+      fi
+      echo "NOTE: embedding bun ${have} instead of ${want}." >&2
     fi
     return
   fi
 
-  local want os cpu asset url tmp bun_bin
-  want="${BUN_VERSION}"
-
+  local os cpu asset url tmp bun_bin
   case "$(uname -s)" in
     Linux) os="linux" ;;
     Darwin) os="darwin" ;;
     *) echo "ERROR: unsupported host OS $(uname -s)" >&2; exit 1 ;;
   esac
-
-  # Bun names its aarch64 asset "aarch64", not "arm64". Getting this wrong is
-  # what produced the original 404.
+  # Bun names its aarch64 asset "aarch64"; "arm64" 404s.
   case "$(uname -m)" in
     x86_64 | amd64) cpu="x64" ;;
     aarch64 | arm64) cpu="aarch64" ;;
@@ -79,157 +124,212 @@ ensure_bun() {
   esac
 
   asset="bun-${os}-${cpu}"
-  # Not every CI runner advertises AVX2; the baseline build is safe everywhere.
   [ "${cpu}" = "x64" ] && asset="${asset}-baseline"
-
-  # Releases are .zip archives. There is no .tar.gz.
   url="https://github.com/oven-sh/bun/releases/download/bun-v${want}/${asset}.zip"
   tmp="$(mktemp -d)"
 
   echo "Installing bun ${want} from ${url}"
   curl -fsSL -o "${tmp}/bun.zip" "${url}"
   unzip -q "${tmp}/bun.zip" -d "${tmp}"
-
   bun_bin="$(find "${tmp}" -type f -name bun -perm -u+x | head -1)"
   if [ -z "${bun_bin}" ]; then
     echo "ERROR: no bun binary inside ${url}" >&2
     exit 1
   fi
-
   export PATH="$(dirname "${bun_bin}"):${PATH}"
   echo "Using $(bun --version) from ${bun_bin}"
 }
 
-# script/build.ts installs the native deps (--os="*" --cpu="*") right before it
-# compiles. Running the exact same installs here first makes those later runs
-# no-ops: they must NOT re-extract @opentui/core from the bun store and undo the
-# bionic fixes applied by prepare_opentui_android.
-prewarm_native_deps() {
-  local core parcel fff
-  core="$(bun -e 'console.log(require("./packages/opencode/package.json").dependencies["@opentui/core"])')"
-  parcel="$(bun -e 'console.log(require("./packages/opencode/package.json").dependencies["@parcel/watcher"])')"
-  fff="$(bun -e 'console.log(require("./packages/opencode/package.json").dependencies["@ff-labs/fff-bun"])')"
-  bun install --os="*" --cpu="*" "@opentui/core@${core}"
-  bun install --os="*" --cpu="*" "@parcel/watcher@${parcel}"
-  bun install --os="*" --cpu="*" "@ff-labs/fff-bun@${fff}"
+CLI_INPUTS=(
+  "@opentui/core"
+  "@opentui/core/parser.worker"
+  "@opentui/solid"
+  "@opentui/solid/bun-plugin"
+  "@opencode-ai/pty"
+  "@parcel/watcher"
+  "web-tree-sitter"
+  "web-tree-sitter/tree-sitter.wasm"
+)
+
+verify_cli_inputs() {
+  local missing=0 dep
+  for dep in "${CLI_INPUTS[@]}"; do
+    if ! (cd "${WORKDIR}/packages/cli" && bun -e "Bun.resolveSync('${dep}', process.cwd())" >/dev/null 2>&1); then
+      echo "  unresolved: ${dep}" >&2
+      missing=1
+    fi
+  done
+  if [ ! -d "${WORKDIR}/node_modules/@opencode/script" ]; then
+    echo "  unresolved: @opencode/script (workspace package)" >&2
+    missing=1
+  fi
+  return "${missing}"
 }
 
-# Two things stand between a cross-compiled android binary and a TUI that runs
-# on bionic:
-#
-# 1. The resolver. Bun 1.4.0 bakes process.platform as "android" into a
-#    --compile binary and ignores a process.platform define, so @opentui/core's
-#    getCurrentNodeAssetTarget() throws "Unsupported OpenTUI Node asset target:
-#    android-arm64" and its import switch never matches. Normalise android to
-#    linux in the exact places the resolver decides.
-#
-# 2. The render library. The npm @opentui/core-linux-arm64 libopentui.so is
-#    glibc (needs libm.so.6/libc.so.6/libdl.so.2) and cannot dlopen on bionic.
-#    Swap in the bionic build vendored in this repo (needs libm.so/libc.so,
-#    which Termux provides).
-prepare_opentui_android() {
-  echo "=== Preparing @opentui/core for bionic (android == linux) ==="
+# Bun can report success while leaving store entries with a directory skeleton
+# and no files, which surfaces much later as `Could not resolve X`. Seen on
+# Android's f2fs, where its hardlink backend silently yields empty dirs.
+repair_install() {
+  echo "=== Repairing a corrupt bun store ===" >&2
+  local dir id
+  for dir in "${WORKDIR}"/node_modules/.bun/*/node_modules/*/ "${WORKDIR}"/node_modules/.bun/*/node_modules/@*/*/; do
+    [ -d "${dir}" ] || continue
+    [ "$(basename "${dir}")" = ".bin" ] && continue
+    [ -f "${dir}package.json" ] && continue
+    # Layout is .bun/<id>/node_modules/<pkg>, so the entry name is two levels up.
+    id="$(basename "$(dirname "$(dirname "${dir}")")")"
+    echo "  dropping empty store entry: ${id}" >&2
+    rm -rf "${dir}" 2>/dev/null || true
+  done
+  echo "  reinstalling with --backend=copyfile" >&2
+  (cd "${WORKDIR}" && bun install --backend=copyfile) >&2 || true
+}
 
-  python3 - "${SCRIPT_DIR}" <<'PY'
-import glob, os, sys
-root = sys.argv[1]
-chunks = glob.glob(os.path.join(root, "opencode", "node_modules", ".bun",
-                                "*@opentui+core*", "node_modules", "@opentui",
-                                "core", "chunk-bun-*.js"))
-# Only the chunk that implements the native-lib resolver needs the
-# android==linux normalisation. Other @opentui/core chunks (renderer, workers)
-# never select a native asset and behave fine with process.platform="android".
-chunks = [c for c in chunks if "getCurrentNodeAssetTarget" in open(c, errors="ignore").read()]
-if not chunks:
-    print("ERROR: @opentui/core resolver chunk (chunk-bun-*.js) not found in bun store", file=sys.stderr)
-    sys.exit(1)
-for c in chunks:
-    s = open(c).read()
-    if "const isLinuxLike = process.platform === \"linux\" || process.platform === \"android\";" in s:
-        print(f"resolver already patched: {c}")
-        continue
-    n = s
-    n = n.replace(
-        "function getCurrentNodeAssetTarget() {\n  const libc = process.env.OPENTUI_LIBC;",
-        "function getCurrentNodeAssetTarget() {\n  const libc = process.env.OPENTUI_LIBC;\n  const isLinuxLike = process.platform === \"linux\" || process.platform === \"android\";",
-        1)
-    n = n.replace(
-        'if (process.platform === "linux" && libc !== undefined',
-        'if (isLinuxLike && libc !== undefined', 1)
-    n = n.replace(
-        "    platform: process.platform,",
-        "    platform: isLinuxLike ? \"linux\" : process.platform,", 1)
-    n = n.replace(
-        '...process.platform === "linux" && libc === "musl"',
-        '...isLinuxLike && libc === "musl"', 1)
-    n = n.replace(
-        '  if (process.platform === "linux") {',
-        '  if (process.platform === "linux" || process.platform === "android") {', 1)
-    if "process.platform === \"linux\" || process.platform === \"android\"" not in n:
-        print(f"ERROR: failed to patch resolver in {c}", file=sys.stderr)
-        sys.exit(1)
-    open(c, "w").write(n)
-    print(f"patched resolver: {c}")
-PY
+install_workspace() {
+  echo "=== Installing workspace dependencies ==="
+  local backend=()
+  [ "${BUN_INSTALL_BACKEND}" != "hardlink" ] && backend=("--backend=${BUN_INSTALL_BACKEND}")
+  # A non-zero exit is not automatically fatal (one bad package aborts the whole
+  # workspace install), but every input the compile needs must be present.
+  (cd "${WORKDIR}" && bun install "${backend[@]+"${backend[@]}"}") || true
 
-  local pkg
-  pkg="$(find "${SCRIPT_DIR}/opencode/node_modules/.bun" -type d \
-    -path '*@opentui+core-linux-arm64@*/node_modules/@opentui/core-linux-arm64' 2>/dev/null | head -1)"
-  if [ -z "${pkg}" ]; then
-    echo "ERROR: @opentui/core-linux-arm64 not found in bun store" >&2
+  if verify_cli_inputs; then
+    echo "All CLI build inputs resolved."
+    return
+  fi
+  repair_install
+  if verify_cli_inputs; then
+    echo "All CLI build inputs resolved after repair."
+    return
+  fi
+  echo "ERROR: build inputs still missing after a repair attempt." >&2
+  echo "       Try: rm -rf opencode/node_modules ~/.bun/install/cache" >&2
+  echo "       and re-run, possibly with BUN_INSTALL_BACKEND=copyfile." >&2
+  exit 1
+}
+
+# The only native deps build.ts installs with --os=* --cpu=*, which is what
+# materialises the android @opentui packages. @opencode-ai/pty (v2's
+# replacement for @ff-labs/fff-bun) has no android build, which is why
+# android-target.patch skips embedding it.
+prewarm_native_deps() {
+  local core pty
+  core="$(bun -e 'console.log(require("./opencode/packages/cli/package.json").dependencies["@opentui/core"])')"
+  pty="$(bun -e 'console.log(require("./opencode/packages/cli/package.json").dependencies["@opencode-ai/pty"])')"
+  (cd "${WORKDIR}" && bun install --os="*" --cpu="*" "@opentui/core@${core}")
+  (cd "${WORKDIR}" && bun install --os="*" --cpu="*" "@opencode-ai/pty@${pty}")
+}
+
+apply_patches() {
+  echo "=== Applying patches ==="
+  local count=0 applied=0 skipped=0 patch
+  shopt -s nullglob
+  for patch in "${SCRIPT_DIR}"/patches/*.patch "${SCRIPT_DIR}"/patches/common/*.patch; do
+    count=$((count + 1))
+    if git -C "${WORKDIR}" apply --check "${patch}" 2>/dev/null; then
+      echo "  applying $(basename "${patch}")"
+      git -C "${WORKDIR}" apply "${patch}"
+      applied=$((applied + 1))
+    elif git -C "${WORKDIR}" apply --reverse --check "${patch}" 2>/dev/null; then
+      echo "  skipping $(basename "${patch}") (already applied)"
+      skipped=$((skipped + 1))
+    else
+      echo "ERROR: $(basename "${patch}") applies neither forward nor reverse." >&2
+      echo "       Upstream moved; the build output can no longer be trusted." >&2
+      git -C "${WORKDIR}" apply --check "${patch}" 2>&1 | head -5 >&2 || true
+      exit 1
+    fi
+  done
+  echo "  applied ${applied}, already present ${skipped}, total ${count}"
+  # Load-bearing: with no patches, --target= matches nothing and the build would
+  # exit 0 having produced nothing.
+  if [ "${count}" -eq 0 ]; then
+    echo "ERROR: no patches found; the android target would be missing" >&2
     exit 1
   fi
-  cp -f "${SCRIPT_DIR}/vendor/@opentui/core-linux-arm64/libopentui.so" "${pkg}/libopentui.so"
-  echo "Replaced ${pkg}/libopentui.so with the bionic build"
 }
 
+# The npm libopentui.so is a glibc build needing libm.so.6/libc.so.6/libdl.so.2
+# and cannot be dlopen()ed on bionic. The vendored one is version-locked to
+# @opentui/core, because the JS binds native entry points by symbol name, so a
+# blob from another version is missing calls rather than merely outdated -- see
+# vendor/README.md.
+prepare_opentui_android() {
+  echo "=== Swapping @opentui/core-linux-arm64 libopentui.so for bionic ==="
+  local pkg vendor want have
+  vendor="${SCRIPT_DIR}/vendor/@opentui/core-linux-arm64/libopentui.so"
+  if [ ! -f "${vendor}" ]; then
+    echo "ERROR: ${vendor} is missing." >&2
+    exit 1
+  fi
+  # A stale blob loads and then fails on first use of a new entry point, which
+  # on a phone looks like an unrelated dlopen error. Catch it here instead.
+  # v2 pins @opentui/core as "catalog:", so the version lives in the root
+  # workspace catalog rather than in the cli package.
+  want="$(cd "${WORKDIR}" && bun -e '
+    const cli = require("./packages/cli/package.json")
+    const root = require("./package.json")
+    const dep = cli.dependencies["@opentui/core"]
+    const v = dep && dep !== "catalog:" ? dep : root.workspaces?.catalog?.["@opentui/core"]
+    if (!v || v === "catalog:") { console.error("cannot resolve @opentui/core"); process.exit(1) }
+    console.log(v.replace(/^[\^~>=<\s]+/, ""))
+  ')"
+  have="$(cat "${SCRIPT_DIR}/vendor/@opentui/core-linux-arm64/VERSION" 2>/dev/null || true)"
+  if [ "${have}" != "${want}" ]; then
+    echo "ERROR: vendored libopentui.so is for @opentui/core ${have:-unknown}," >&2
+    echo "       but this checkout resolves ${want}." >&2
+    echo "       Run ./scripts/build-libopentui.sh ${want} and commit the result." >&2
+    exit 1
+  fi
+  pkg="$(find "${WORKDIR}/node_modules/.bun" -type d \
+    -path '*@opentui+core-linux-arm64@*/node_modules/@opentui/core-linux-arm64' 2>/dev/null | head -1)"
+  if [ -z "${pkg}" ]; then
+    echo "ERROR: @opentui/core-linux-arm64 not found in the bun store." >&2
+    exit 1
+  fi
+  cp -f "${vendor}" "${pkg}/libopentui.so"
+  echo "  replaced ${pkg}/libopentui.so with the bionic build for @opentui/core ${have}"
+}
+
+compile() {
+  # No --skip-install: build.ts's own `bun install --os=* --cpu=*` is what
+  # materialises the android packages, and prewarm_native_deps already ran the
+  # identical commands so they cannot re-extract a glibc .so over the bionic one.
+  local args=("--target=${BUILD_TARGET}")
+  if [ "${BUILD_WEB_UI:-0}" = "1" ]; then
+    echo "Embedding the app assets (BUILD_WEB_UI=1)"
+  else
+    args+=(--skip-web-ui)
+  fi
+  echo "=== Compiling ${BUILD_TARGET} ==="
+  (cd "${WORKDIR}" && OPENCODE_VERSION="${VERSION}" \
+    bun run packages/cli/script/build.ts "${args[@]}")
+}
+
+# This repo once shipped a green build that produced nothing, so check the
+# output instead of trusting the exit status.
+assert_android_binary() {
+  if [ ! -f "${WORKDIR}/${ANDROID_BINARY}" ]; then
+    echo "ERROR: ${ANDROID_BINARY} was not produced." >&2
+    echo "       The android target comes from patches/common/android-target.patch." >&2
+    find "${WORKDIR}/packages/cli/dist" -maxdepth 3 >&2 2>/dev/null || true
+    exit 1
+  fi
+  local bin="${WORKDIR}/${ANDROID_BINARY}"
+  command -v file >/dev/null 2>&1 && file "${bin}"
+  if ! grep -qa -- "${ANDROID_INTERP}" "${bin}"; then
+    echo "ERROR: ${bin} is not an android binary (no ${ANDROID_INTERP})." >&2
+    exit 1
+  fi
+  echo "Verified: android binary with ${ANDROID_INTERP} interpreter"
+  echo "Android binary: ${bin} ($(wc -c < "${bin}" | tr -d ' ') bytes)"
+}
+
+ensure_source
 ensure_bun
-
-cd "${WORKDIR}"
-
-# A full workspace install is mandatory: script/build.ts imports the
-# @opencode-ai/script workspace package, and embedding the web UI shells out to
-# a vite build in packages/app.
-echo "Installing workspace dependencies..."
-bun install
-
+install_workspace
 prewarm_native_deps
+apply_patches
 prepare_opentui_android
-
-# Note the absence of --single and --skip-install:
-#   --single       restricts the build to the *host* platform/arch, so it would
-#                  never emit the arm64 or android binaries we are here for.
-#   --skip-install skips the `bun install --os="*" --cpu="*"` that fetches the
-#                  native deps (@opentui/core, @parcel/watcher, @ff-labs/fff-bun)
-#                  for every target, which cross-compiling requires.
-# script/build.ts takes no --target flag; targets come from its allTargets list.
-# The embedded web UI (a vite build of packages/app) is skipped by default:
-# it adds tens of MB to the shipped binary and only `opencode serve`'s browser
-# UI needs it. Allocate BUILD_WEB_UI=1 (or the legacy SKIP_WEB_UI=0) to embed.
-echo "Compiling all targets..."
-BUILD_ARGS=()
-if [ "${BUILD_WEB_UI:-0}" != "1" ] && [ "${SKIP_WEB_UI:-1}" != "0" ]; then
-  BUILD_ARGS+=(--skip-embed-web-ui)
-else
-  echo "Embedding the web UI (use --skip-embed-web-ui to avoid the size cost)"
-fi
-
-OPENCODE_VERSION="${VERSION}" bun run packages/opencode/script/build.ts ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}
-
-echo "=== Build complete ==="
-ls -la packages/opencode/dist/
-
-# The android target exists only because patches/common/android-target.patch adds
-# it -- upstream opencode has no bionic target at all. If that patch ever stops
-# applying, all twelve other targets still build and this script would exit 0
-# with nothing to ship. That is exactly how the first green-but-empty build
-# happened, so assert the one output that matters.
-ANDROID_BINARY="packages/opencode/dist/opencode-linux-arm64-android/bin/opencode"
-if [ ! -f "${ANDROID_BINARY}" ]; then
-  echo "ERROR: ${ANDROID_BINARY} was not produced." >&2
-  echo "The android target is added by patches/common/android-target.patch." >&2
-  echo "Verify that patch applied -- upstream has no bionic target of its own." >&2
-  exit 1
-fi
-
-echo "Android binary: $(ls -la "${ANDROID_BINARY}")"
+compile
+assert_android_binary

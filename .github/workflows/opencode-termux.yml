@@ -9,24 +9,31 @@ on:
       - '.github/workflows/opencode-termux.yml'
       - 'build.sh'
       - 'package.sh'
+      - 'Dockerfile.build'
       - 'patches/**'
+      - 'vendor/**'
+      - 'scripts/**'
   workflow_dispatch:
     inputs:
-      opencode_version:
-        description: 'OpenCode branch or tag to build (default: dev)'
+      opencode_ref:
+        description: 'OpenCode ref. `latest` (default) picks the highest published v2.x.y tag; `v2` is the branch head. `2.0` and `dev` are v1 lines.'
         required: false
-        default: 'dev'
-      release:
-        description: 'Publish a GitHub release with the built tarballs'
+        default: 'latest'
+      version:
+        description: 'Version baked into the binary. Empty uses the release version of the checked-out tag, or a 0.0.0-dev-<sha> preview for a branch.'
+        required: false
+        default: ''
+      bun_version:
+        description: 'Override the Bun used to compile. It is the runtime embedded in the binary, and @opencode/script enforces ^<checkout pin>.'
+        required: false
+        default: ''
+      with_web_ui:
+        description: 'Embed the app assets (adds ~30 MB, only `opencode serve` needs them)'
         required: false
         type: boolean
         default: false
-      bun_version:
-        description: 'Bun version to compile with (its runtime is embedded in the binary)'
-        required: false
-        default: '1.4.0'
-      with_web_ui:
-        description: 'Embed the web UI (adds ~30 MB to the binary for `opencode serve`)'
+      release:
+        description: 'Publish a GitHub release with the tarball'
         required: false
         type: boolean
         default: false
@@ -35,145 +42,73 @@ permissions:
   contents: read
 
 env:
-  OPENCODE_REPO: 'https://github.com/anomalyco/opencode.git'
-  # `bun build --compile` embeds the compiling Bun's runtime, so this is the
-  # runtime the Termux binary ships with. 1.3.14 (opencode's packageManager pin)
-  # segfaults at startup on arm64 bionic in the JS parser's `using` lowering.
-  BUN_VERSION: ${{ github.event.inputs.bun_version || '1.4.0' }}
+  # Empty: build.sh reads the required version from the checkout's packageManager
+  # field, since @opencode/script enforces ^<that pin> and it moves.
+  BUN_VERSION: ${{ github.event.inputs.bun_version || '' }}
 
 jobs:
-  # Bun cross-compiles every target from a single x64 Linux host, which is how
-  # opencode's own publish.yml builds releases. Building once and packaging
-  # afterwards avoids recompiling the whole target matrix per variant.
   build:
-    name: Build all targets
+    name: Build opencode-linux-arm64-android
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
     outputs:
-      version: ${{ steps.opencode.outputs.version }}
+      version: ${{ steps.ref.outputs.version }}
     steps:
       - name: Checkout opencode-termux
-        uses: actions/checkout@v4
-        with:
-          path: opencode-termux
+        uses: actions/checkout@v7
 
-      - name: Pull opencode source
-        id: opencode
-        working-directory: opencode-termux
-        run: |
-          REF="${{ github.event.inputs.opencode_version || 'dev' }}"
-          git clone --depth 1 --branch "$REF" "$OPENCODE_REPO" opencode
-          SHA="$(git -C opencode rev-parse --short HEAD)"
-          if [ "$REF" = "dev" ]; then
-            # Keep the 0.0.0- prefix so opencode's Script helper treats this as a
-            # preview build and derives the channel from the branch.
-            VERSION="0.0.0-dev-${SHA}"
-          else
-            VERSION="$REF"
-          fi
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "commit=${SHA}" >> "$GITHUB_OUTPUT"
-          echo "Building opencode ${VERSION} (${SHA})"
-
-      - name: Apply patches
-        working-directory: opencode-termux
-        run: |
-          shopt -s nullglob
-          # A single build produces the one bionic binary both variants ship, so
-          # patches are no longer scoped per variant.
-          count=0
-          for patch in patches/*.patch patches/common/*.patch; do
-            echo "Applying ${patch}"
-            git -C opencode apply "../${patch}"
-            count=$((count + 1))
-          done
-          echo "Applied ${count} patch(es)"
-          # android-target.patch is not optional: upstream has no bionic target,
-          # so an empty patch set silently yields a build with nothing to ship.
-          if [ "$count" -eq 0 ]; then
-            echo "ERROR: no patches found; the android target would be missing" >&2
-            exit 1
-          fi
-
-      # node-gyp (invoked by bun install for native postinstall scripts) needs
-      # Node >= 22; the runner image can ship an older one on PATH.
+      # node-gyp runs native postinstall scripts during `bun install` and needs
+      # Node >= 22; the runner image can ship an older one.
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '24'
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          # Not bun-version-file: that resolves opencode's packageManager pin,
-          # whose runtime crashes on bionic. script/build.ts still enforces its
-          # own ^<packageManager> range and errors clearly if this drifts out.
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Cache Bun dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('opencode-termux/opencode/bun.lock') }}
-          restore-keys: ${{ runner.os }}-bun-
-
       - name: Build
-        working-directory: opencode-termux
+        id: ref
         env:
+          OPENCODE_REPO: 'https://github.com/anomalyco/opencode.git'
+          OPENCODE_REF: ${{ github.event.inputs.opencode_ref || 'latest' }}
+          VERSION: ${{ github.event.inputs.version || '' }}
           BUN_VERSION: ${{ env.BUN_VERSION }}
-          # The web UI is embedded only when opted in: it adds tens of MB to the
-          # binary and only `opencode serve`'s browser UI needs it.
           BUILD_WEB_UI: ${{ github.event.inputs.with_web_ui || '0' }}
-        run: ./build.sh "${{ steps.opencode.outputs.version }}"
+        run: ./build.sh "$VERSION"
 
-      # build.ts has no target filter, so the glibc/musl/darwin/windows targets
-      # are compiled and then dropped here. Only the bionic binary is kept.
       - name: Upload android binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: opencode-dist
           retention-days: 7
           if-no-files-found: error
-          path: opencode-termux/opencode/packages/opencode/dist/opencode-linux-arm64-android/bin/opencode
+          path: opencode/packages/cli/dist/cli-linux-arm64-android/bin/opencode
 
-  # Both Termux package managers run on bionic, so apt and termux-pacman get the
-  # same arm64 android binary under different tarball names. aarch64 is the only
-  # arch here: Bun ships no armv7 build and opencode has no x64 android target.
+  # One tarball, not one per package manager: stock Termux and termux-pacman
+  # both run on bionic and install identical bytes.
   package:
-    name: Package ${{ matrix.arch }}-${{ matrix.variant }}
+    name: Package
     needs: build
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: aarch64
-            variant: apt
-          - arch: aarch64
-            variant: pacman
     steps:
       - name: Checkout opencode-termux
-        uses: actions/checkout@v4
-        with:
-          path: opencode-termux
+        uses: actions/checkout@v7
 
       - name: Download binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: opencode-dist
-          path: opencode-termux/dist
+          path: dist
 
       - name: Package
-        working-directory: opencode-termux
         env:
-          DISTDIR: ${{ github.workspace }}/opencode-termux/dist
-        run: ./package.sh "${{ matrix.arch }}" "${{ matrix.variant }}" "${{ needs.build.outputs.version }}"
+          # The upload flattens the dist layout, so point package.sh at the leaf.
+          DISTDIR: ${{ github.workspace }}/dist
+        run: ./package.sh "${{ needs.build.outputs.version }}"
 
       - name: Upload tarball
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: opencode-${{ matrix.arch }}-${{ matrix.variant }}
-          path: opencode-termux/out/opencode-*-${{ matrix.arch }}-${{ matrix.variant }}.tar.gz
+          name: opencode-tarball
+          path: out/opencode-termux-*.tar.gz
           retention-days: 30
           if-no-files-found: error
 
@@ -188,14 +123,13 @@ jobs:
       contents: write
     steps:
       - name: Checkout opencode-termux
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Download all tarballs
-        uses: actions/download-artifact@v4
+      - name: Download tarball
+        uses: actions/download-artifact@v8
         with:
+          name: opencode-tarball
           path: artifacts
-          pattern: opencode-*-*
-          merge-multiple: true
 
       - name: Create GitHub Release
         env:
@@ -203,7 +137,6 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           TAG="${VERSION}-termux"
-          # merge-multiple flattens everything into artifacts/, so no ** needed.
           ls -la artifacts/
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" artifacts/*.tar.gz --clobber
@@ -212,9 +145,9 @@ jobs:
               --title "OpenCode ${VERSION} for Termux" \
               --notes "Pre-built OpenCode binaries for Termux (Android).
 
-          **Architecture:** aarch64 (armv8)
-          **Variants:** apt (stock Termux), pacman (termux-pacman) -- same bionic binary
+          **Architecture:** aarch64 (armv8), bionic libc.
+          Stock Termux (apt/pkg) and termux-pacman install the same binary.
 
-          Install with: \`tar -xzf opencode-<version>-<arch>-<variant>.tar.gz -C \$PREFIX/bin\`" \
+          Install with: \`tar -xzf opencode-termux-<version>.tar.gz -C \$PREFIX/bin\`" \
               artifacts/*.tar.gz
           fi

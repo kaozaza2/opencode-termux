@@ -1,0 +1,16 @@
+diff --git a/packages/cli/script/build.ts b/packages/cli/script/build.ts
+index 37726dc..5cf0203 100755
+--- a/packages/cli/script/build.ts
++++ b/packages/cli/script/build.ts
+@@ -169,6 +169,11 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
+       // FFF_LIBC selects the fff native lib variant: "musl" or "gnu".
+       FFF_LIBC: item.os === "linux" ? `'${item.abi ?? "gnu"}'` : "undefined",
+       ...(item.os === "linux" ? { "process.env.OPENTUI_LIBC": JSON.stringify(item.abi ?? "glibc") } : {}),
++      // A bun android binary reports process.platform === "android", but
++      // @opentui/core only accepts "linux" | "darwin" | "win32" and throws
++      // `Unsupported OpenTUI Node asset target: android-arm64`. Pin the value
++      // so the bundled resolver picks the linux native asset instead.
++      ...(item.android ? { "process.platform": JSON.stringify("linux") } : {}),
+     },
+   })
+ 

@@ -1,0 +1,16 @@
+--- a/lib/std/posix.zig
++++ b/lib/std/posix.zig
+@@ -940,6 +940,13 @@
+ 
+ /// Examine and change a signal action.
+ pub fn sigaction(sig: SIG, noalias act: ?*const Sigaction, noalias oact: ?*Sigaction) void {
++    if (comptime builtin.abi.isAndroid()) {
++        switch (linux.errno(linux.sigaction(sig, act, oact))) {
++            .SUCCESS => return,
++            else => unreachable,
++        }
++        return;
++    }
+     switch (errno(system.sigaction(sig, act, oact))) {
+         .SUCCESS => return,
+         // EINVAL means the signal is either invalid or some signal that cannot have its action

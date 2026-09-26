@@ -1,0 +1,23 @@
+--- a/lib/std/Io/Threaded.zig
++++ b/lib/std/Io/Threaded.zig
+@@ -4673,18 +4673,8 @@
+             switch (posix.errno(rc)) {
+                 .SUCCESS => {
+                     syscall.finish();
+-                    return .{
+-                        .file = .{
+-                            .handle = @intCast(rc),
+-                            .flags = .{ .nonblocking = false },
+-                        },
+-                        .file_basename_hex = 0,
+-                        .dest_sub_path = dest_path,
+-                        .file_open = true,
+-                        .file_exists = false,
+-                        .close_dir_on_deinit = false,
+-                        .dir = dir,
+-                    };
++                    closeFd(@intCast(rc));
++                    break :tmpfile;
+                 },
+                 .INTR => {
+                     try syscall.checkCancel();

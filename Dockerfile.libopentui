@@ -1,0 +1,53 @@
+# Rebuilds the bionic libopentui.so that vendor/ ships.
+#
+#   docker build -t opentui-lib -f Dockerfile.libopentui --build-arg OPENTUI_VERSION=0.5.12 .
+#
+# The output lands in the build context at
+# vendor/@opentui/core-linux-arm64/libopentui.so, ready to be committed.
+#
+# This is a separate image from Dockerfile.build on purpose: the opencode build
+# only *consumes* the blob, and almost nobody needs a 4 GB zig toolchain plus a
+# 660 MB NDK to rebuild opencode. Run this only when @opentui/core changes.
+#
+# Needs a Dockerfile.build to exist for the COPY of build.sh/package.sh, so the
+# build context must be the repository root (it copies the one script it needs).
+
+FROM ubuntu:24.04
+
+# xz: zig ships as .tar.xz.
+# unzip: the script extracts the NDK sysroot from its zip.
+# binutils: readelf/strip, used by the script's bionic + export checks.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      binutils \
+      curl \
+      git \
+      tar \
+      unzip \
+      xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# node reads the @opentui/core version out of the opencode checkout.
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+COPY scripts ./scripts
+RUN chmod +x scripts/build-libopentui.sh
+
+# Empty by default: the script reads the version from the opencode checkout when
+# no argument is given, and falls back to this when the checkout is absent.
+ARG OPENTUI_VERSION=""
+
+RUN set -eux; \
+    if [ -n "$OPENTUI_VERSION" ]; then \
+      ./scripts/build-libopentui.sh "$OPENTUI_VERSION"; \
+    else \
+      echo "Set --build-arg OPENTUI_VERSION=<x.y.z>, e.g. 0.5.12" >&2; \
+      exit 1; \
+    fi
+
+# The artifact is left in the build context; copy it out and commit it.
+CMD echo "vendor/@opentui/core-linux-arm64/libopentui.so is ready to commit"

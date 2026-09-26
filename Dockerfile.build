@@ -5,21 +5,25 @@
 #
 # Bun cross-compiles the arm64 android target from this x86_64 image; nothing
 # arm64 executes during the build.
+#
+# This image consumes the bionic libopentui.so already committed under vendor/.
+# To regenerate that blob against a new @opentui/core, see vendor/README.md --
+# it is version-locked to @opentui/core and cannot be refreshed by this image.
 
 FROM ubuntu:24.04
 
 # unzip: Bun releases are .zip archives.
-# file:   build.sh reports what it packaged.
+# file:   build.sh reports what it produced.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
       file \
       git \
-      python3 \
       unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# node-gyp runs during `bun install` for native postinstall scripts and needs Node >= 22.
+# node-gyp runs during `bun install` for native postinstall scripts and needs
+# Node >= 22.
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
@@ -28,19 +32,21 @@ WORKDIR /workspace
 
 COPY build.sh package.sh ./
 COPY patches ./patches
+# The bionic libopentui.so that build.sh swaps into the bun store. Omitting
+# this is why the image used to fail at prepare_opentui_android.
+COPY vendor ./vendor
 RUN chmod +x build.sh package.sh
 
+# `latest` resolves to the highest published v2.x.y tag. `2.0` and `dev` are
+# both v1 lines: `2.0` is a stale exploration branch on packages/opencode 1.x.
 ENV OPENCODE_REPO=https://github.com/anomalyco/opencode.git
-ENV OPENCODE_REF=dev
-ENV VERSION=0.0.0-dev-local
+ENV OPENCODE_REF=latest
+# Empty lets build.sh derive the version from the release tag it checked out.
+ENV VERSION=
 
+# build.sh owns everything from here: it clones the source, applies the
+# patches, compiles and packages. Applying the patches here as well would make
+# the second application fail with "patch does not apply".
 CMD set -eu; \
-    git clone --depth 1 --branch "$OPENCODE_REF" "$OPENCODE_REPO" opencode; \
-    for p in patches/*.patch patches/common/*.patch; do \
-      [ -e "$p" ] || continue; \
-      echo "Applying $p"; \
-      git -C opencode apply "../$p"; \
-    done; \
-    ./build.sh "$VERSION"; \
-    ./package.sh aarch64 apt "$VERSION"; \
-    ./package.sh aarch64 pacman "$VERSION"
+    ./build.sh ${VERSION:+"$VERSION"}; \
+    ./package.sh ${VERSION:+"$VERSION"}

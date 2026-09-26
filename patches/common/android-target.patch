@@ -1,61 +1,64 @@
-diff --git a/packages/opencode/script/build.ts b/packages/opencode/script/build.ts
-index ce45f77..5290f8c 100755
---- a/packages/opencode/script/build.ts
-+++ b/packages/opencode/script/build.ts
-@@ -55,6 +55,7 @@ const allTargets: {
+diff --git a/packages/cli/script/build.ts b/packages/cli/script/build.ts
+index f55d890..37726dc 100755
+--- a/packages/cli/script/build.ts
++++ b/packages/cli/script/build.ts
+@@ -35,6 +35,7 @@ const allTargets: {
    arch: "arm64" | "x64"
    abi?: "musl"
    avx2?: false
 +  android?: boolean
  }[] = [
-   {
-     os: "linux",
-@@ -85,6 +86,11 @@ const allTargets: {
-     abi: "musl",
-     avx2: false,
-   },
-+  {
-+    os: "linux",
-+    arch: "arm64",
-+    android: true,
-+  },
-   {
-     os: "darwin",
-     arch: "arm64",
-@@ -150,6 +156,7 @@ for (const item of targets) {
+   { os: "linux", arch: "arm64" },
+   { os: "linux", arch: "x64" },
+@@ -42,6 +43,7 @@ const allTargets: {
+   { os: "linux", arch: "arm64", abi: "musl" },
+   { os: "linux", arch: "x64", abi: "musl" },
+   { os: "linux", arch: "x64", abi: "musl", avx2: false },
++  { os: "linux", arch: "arm64", android: true },
+   { os: "darwin", arch: "arm64" },
+   { os: "darwin", arch: "x64" },
+   { os: "darwin", arch: "x64", avx2: false },
+@@ -80,11 +82,16 @@ const appAssetsPlugin: BunPlugin = {
+ }
+ 
+ for (const item of targets) {
+-  const opencodePty = await resolveOpencodePty({
+-    platform: item.os,
+-    arch: item.arch,
+-    ...(item.os === "linux" ? { libc: item.abi ?? "glibc" } : {}),
+-  })
++  // The published opencode-pty helper is only built for glibc/musl. On bionic
++  // (android) a glibc binary cannot be exec'd, so leave the asset unset: the
++  // runtime then falls back to a plain `opencode-pty` from PATH.
++  const opencodePty = item.android
++    ? undefined
++    : await resolveOpencodePty({
++        platform: item.os,
++        arch: item.arch,
++        ...(item.os === "linux" ? { libc: item.abi ?? "glibc" } : {}),
++      })
+   const opencodePtyPlugin: BunPlugin = {
+     name: "opencode-pty-binary",
+     setup(build) {
+@@ -112,7 +119,12 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
+     name: "parcel-watcher-binding",
+     setup(build) {
+       build.onLoad({ filter: /filesystem[/\\]watcher-binding\.ts$/ }, () => ({
+-        contents: `export default () => require(${JSON.stringify(parcelWatcherPackage)})`,
++        // On android there is no bionic @parcel/watcher build. Resolve to
++        // undefined so the core watcher falls back to node:fs instead of
++        // dlopen()ing a glibc addon.
++        contents: item.android
++          ? `export default undefined`
++          : `export default () => require(${JSON.stringify(parcelWatcherPackage)})`,
+         loader: "js",
+       }))
+     },
+@@ -261,6 +273,7 @@ function targetName(item: (typeof allTargets)[number]) {
      item.arch,
      item.avx2 === false ? "baseline" : undefined,
-     item.abi === undefined ? undefined : item.abi,
+     item.abi,
 +    item.android ? "android" : undefined,
    ]
      .filter(Boolean)
      .join("-")
-@@ -160,6 +167,10 @@ for (const item of targets) {
-   const treeSitterWorkerPath = "opentui-tree-sitter-worker.js"
-   const bunfsRoot = item.os === "win32" ? "B:/~BUN/root/" : "/$bunfs/root/"
- 
-+  const compileTarget = item.android
-+    ? `bun-${item.os}-${item.arch}-android`
-+    : name.replace(pkg.name, "bun")
-+
-   await Bun.build({
-     conditions: ["bun", "node"],
-     tsconfig: "./tsconfig.json",
-@@ -174,7 +185,7 @@ for (const item of targets) {
-       autoloadDotenv: false,
-       autoloadTsconfig: true,
-       autoloadPackageJson: true,
--      target: name.replace(pkg.name, "bun") as any,
-+      target: compileTarget as any,
-       outfile: `dist/${name}/bin/opencode`,
-       execArgv: [`--user-agent=opencode/${Script.version}`, "--use-system-ca", "--"],
-       windows: {},
-@@ -202,7 +213,7 @@ for (const item of targets) {
-   })
- 
-   // Smoke test: only run if binary is for current platform
--  if (item.os === process.platform && item.arch === process.arch && !item.abi) {
-+  if (item.os === process.platform && item.arch === process.arch && !item.abi && !item.android) {
-     const binaryPath = `dist/${name}/bin/opencode`
-     console.log(`Running smoke test: ${binaryPath} --version`)
-     try {
