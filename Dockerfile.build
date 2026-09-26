@@ -10,7 +10,7 @@
 # To regenerate that blob against a new @opentui/core, see vendor/README.md --
 # it is version-locked to @opentui/core and cannot be refreshed by this image.
 
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 # unzip: Bun releases are .zip archives.
 # file:   build.sh reports what it produced.

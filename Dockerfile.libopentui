@@ -12,7 +12,7 @@
 # Needs a Dockerfile.build to exist for the COPY of build.sh/package.sh, so the
 # build context must be the repository root (it copies the one script it needs).
 
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 # xz: zig ships as .tar.xz.
 # unzip: the script extracts the NDK sysroot from its zip.
