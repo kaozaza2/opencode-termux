@@ -20,7 +20,7 @@ The JS half resolves native entry points by symbol name — `createRenderer`,
 `@opentui/core` is therefore *missing calls*, not merely out of date: it may
 load fine and then crash on first use of a new entry point.
 
-opencode v2 uses `@opentui/core` 0.5.12, which added seven entry points the
+opencode v2 uses `@opentui/core` 0.6.5, which added seven entry points the
 previously vendored blob did not have:
 
 ```
@@ -34,14 +34,14 @@ So **bump `@opentui/core` and rebuild this file.** To regenerate:
 
 ```bash
 ./scripts/build-libopentui.sh                 # version from the opencode checkout
-./scripts/build-libopentui.sh 0.5.12         # or explicit
+./scripts/build-libopentui.sh 0.6.5         # or explicit
 ```
 
 or in Docker, if you would rather not install a zig toolchain:
 
 ```bash
 docker build -t opentui-lib -f Dockerfile.libopentui \
-  --build-arg OPENTUI_VERSION=0.5.12 .
+  --build-arg OPENTUI_VERSION=0.6.5 .
 ```
 
 `DT_NEEDED` of a correct build looks like `libm.so`, `libc.so`, `libdl.so`.

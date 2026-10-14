@@ -1,8 +1,8 @@
 diff --git a/packages/cli/script/build.ts b/packages/cli/script/build.ts
-index f55d890..37726dc 100755
+index 3cac51e..987ae16 100755
 --- a/packages/cli/script/build.ts
 +++ b/packages/cli/script/build.ts
-@@ -35,6 +35,7 @@ const allTargets: {
+@@ -39,6 +39,7 @@ const allTargets: {
    arch: "arm64" | "x64"
    abi?: "musl"
    avx2?: false
@@ -10,7 +10,7 @@ index f55d890..37726dc 100755
  }[] = [
    { os: "linux", arch: "arm64" },
    { os: "linux", arch: "x64" },
-@@ -42,6 +43,7 @@ const allTargets: {
+@@ -46,6 +47,7 @@ const allTargets: {
    { os: "linux", arch: "arm64", abi: "musl" },
    { os: "linux", arch: "x64", abi: "musl" },
    { os: "linux", arch: "x64", abi: "musl", avx2: false },
@@ -18,7 +18,7 @@ index f55d890..37726dc 100755
    { os: "darwin", arch: "arm64" },
    { os: "darwin", arch: "x64" },
    { os: "darwin", arch: "x64", avx2: false },
-@@ -80,11 +82,16 @@ const appAssetsPlugin: BunPlugin = {
+@@ -112,11 +114,16 @@ const pluginRuntimePlugin: BunPlugin = {
  }
  
  for (const item of targets) {
@@ -40,7 +40,7 @@ index f55d890..37726dc 100755
    const opencodePtyPlugin: BunPlugin = {
      name: "opencode-pty-binary",
      setup(build) {
-@@ -112,7 +119,12 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
+@@ -144,7 +151,12 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
      name: "parcel-watcher-binding",
      setup(build) {
        build.onLoad({ filter: /filesystem[/\\]watcher-binding\.ts$/ }, () => ({
@@ -54,7 +54,7 @@ index f55d890..37726dc 100755
          loader: "js",
        }))
      },
-@@ -261,6 +273,7 @@ function targetName(item: (typeof allTargets)[number]) {
+@@ -302,6 +314,7 @@ function targetName(item: (typeof allTargets)[number]) {
      item.arch,
      item.avx2 === false ? "baseline" : undefined,
      item.abi,

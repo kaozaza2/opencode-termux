@@ -1,6 +1,6 @@
 # Rebuilds the bionic libopentui.so that vendor/ ships.
 #
-#   docker build -t opentui-lib -f Dockerfile.libopentui --build-arg OPENTUI_VERSION=0.5.12 .
+#   docker build -t opentui-lib -f Dockerfile.libopentui --build-arg OPENTUI_VERSION=0.6.5 .
 #
 # The output lands in the build context at
 # vendor/@opentui/core-linux-arm64/libopentui.so, ready to be committed.
@@ -45,7 +45,7 @@ RUN set -eux; \
     if [ -n "$OPENTUI_VERSION" ]; then \
       ./scripts/build-libopentui.sh "$OPENTUI_VERSION"; \
     else \
-      echo "Set --build-arg OPENTUI_VERSION=<x.y.z>, e.g. 0.5.12" >&2; \
+      echo "Set --build-arg OPENTUI_VERSION=<x.y.z>, e.g. 0.6.5" >&2; \
       exit 1; \
     fi
 

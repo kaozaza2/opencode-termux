@@ -1,13 +1,31 @@
 --- a/lib/std/posix.zig
 +++ b/lib/std/posix.zig
-@@ -940,6 +940,13 @@
+@@ -940,6 +940,31 @@
  
  /// Examine and change a signal action.
  pub fn sigaction(sig: SIG, noalias act: ?*const Sigaction, noalias oact: ?*Sigaction) void {
 +    if (comptime builtin.abi.isAndroid()) {
-+        switch (linux.errno(linux.sigaction(sig, act, oact))) {
-+            .SUCCESS => return,
++        var ksa: linux.Sigaction = undefined;
++        var oldksa: linux.Sigaction = undefined;
++        if (act) |a| {
++            ksa = .{
++                .handler = @bitCast(a.handler),
++                .flags = a.flags,
++                .mask = .{a.mask[0]},
++            };
++        }
++        const rc = linux.sigaction(sig, if (act != null) &ksa else null, if (oact != null) &oldksa else null);
++        switch (linux.errno(rc)) {
++            .SUCCESS => {},
 +            else => unreachable,
++        }
++        if (oact) |o| {
++            o.* = .{
++                .handler = @bitCast(oldksa.handler),
++                .flags = @intCast(oldksa.flags),
++                .mask = std.mem.zeroes(@TypeOf(o.mask)),
++            };
++            o.mask[0] = oldksa.mask[0];
 +        }
 +        return;
 +    }
