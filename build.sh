@@ -63,8 +63,22 @@ derive_version() {
 ensure_source() {
   resolve_ref
   if [ -d "${WORKDIR}/.git" ]; then
-    echo "=== Using existing opencode checkout at ${WORKDIR} ==="
-  else
+    current="$(git -C "${WORKDIR}" describe --tags --exact-match 2>/dev/null || true)"
+    if [ -n "${OPENCODE_REF##v*}" ] && [ "${OPENCODE_REF}" = "v2" ]; then
+      current=""  # branch head moves; always refresh
+    fi
+    if [ -z "${current}" ] || [ "${current}" != "${OPENCODE_REF}" ]; then
+      if [ -n "${SKIP_CLONE:-}" ]; then
+        echo "ERROR: existing checkout is ${current:-unknown}, not ${OPENCODE_REF}, and SKIP_CLONE is set." >&2
+        exit 1
+      fi
+      echo "=== Existing checkout (${current:-unknown}) != ${OPENCODE_REF}; recreating ==="
+      rm -rf "${WORKDIR}"
+    else
+      echo "=== Using existing opencode checkout at ${WORKDIR} ==="
+    fi
+  fi
+  if [ ! -d "${WORKDIR}/.git" ]; then
     if [ -n "${SKIP_CLONE:-}" ]; then
       echo "ERROR: no opencode checkout at ${WORKDIR} and SKIP_CLONE is set." >&2
       exit 1
