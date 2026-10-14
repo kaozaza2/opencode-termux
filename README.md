@@ -170,7 +170,7 @@ That coupling is forced, not incidental:
   from a different `@opentui/core` is *missing calls* rather than merely out of
   date — it can load fine and then crash on first use of a new entry point.
 
-opencode v2 resolves `@opentui/core` 0.5.14, which added seven entry points the
+opencode v2 resolves `@opentui/core` 0.5.17, which added seven entry points the
 previously committed blob did not export:
 
 ```
