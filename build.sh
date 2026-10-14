@@ -285,11 +285,30 @@ prepare_opentui_android() {
     console.log(v.replace(/^[\^~>=<\s]+/, ""))
   ')"
   have="$(cat "${SCRIPT_DIR}/vendor/@opentui/core-linux-arm64/VERSION" 2>/dev/null || true)"
-  if [ "${have}" != "${want}" ]; then
+  # A vendored .so is only safe when it is at least as new as the version the
+  # checkout resolves: opentui adds native entry points over time and an older
+  # blob would be missing calls. A newer blob keeps the symbols the older JS
+  # needs (the native ABI is additive), so compare versions instead of
+  # demanding an exact string match.
+  if ! node -e '
+    const a = (process.argv[1] || "").split(".").map((x) => Number(x) || 0)
+    const b = (process.argv[2] || "").split(".").map((x) => Number(x) || 0)
+    const n = Math.max(a.length, b.length)
+    for (let i = 0; i < n; i++) {
+      const x = a[i] || 0
+      const y = b[i] || 0
+      if (x > y) process.exit(1)
+      if (x < y) process.exit(0)
+    }
+    process.exit(0)
+  ' "${want}" "${have}"; then
     echo "ERROR: vendored libopentui.so is for @opentui/core ${have:-unknown}," >&2
-    echo "       but this checkout resolves ${want}." >&2
+    echo "       but this checkout requires @opentui/core ${want} or newer." >&2
     echo "       Run ./scripts/build-libopentui.sh ${want} and commit the result." >&2
     exit 1
+  fi
+  if [ "${have}" != "${want}" ]; then
+    echo "  note: vendored @opentui/core ${have} is newer than resolved ${want}; using it" >&2
   fi
   pkg="$(find "${WORKDIR}/node_modules/.bun" -type d \
     -path '*@opentui+core-linux-arm64@*/node_modules/@opentui/core-linux-arm64' 2>/dev/null | head -1)"
