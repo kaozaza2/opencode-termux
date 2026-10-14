@@ -11,7 +11,7 @@ same file works on both — there is no per-package-manager build.
 
 ```bash
 curl -fsSL \
-  https://github.com/kaozaza2/opencode-termux/releases/latest/download/opencode-termux-2.0.18.tar.gz \
+  https://github.com/kaozaza2/opencode-termux/releases/latest/download/opencode-termux-2.0.24.tar.gz \
   | tar -xz -C $PREFIX/bin
 opencode
 ```
@@ -28,13 +28,13 @@ here target `packages/cli/script/build.ts` and do not apply to v1.
 | Ref | What it is |
 | --- | --- |
 | `latest` | the highest published `v2.x.y` tag — **the default** |
-| `v2.0.18` | one specific release, fixed |
+| `v2.0.24` | one specific release, fixed |
 | `v2` | the v2 branch head, moves |
 | `2.0` | **not v2** — a stale exploration branch still on `packages/opencode` 1.x |
 | `dev` | v1 |
 
 A tag is the default so rebuilding a version reproduces the same binary. The
-version comes from whatever was checked out: the tag for a tag (`v2.0.18` →
+version comes from whatever was checked out: the tag for a tag (`v2.0.24` →
 `2.0.18`), and a `0.0.0-dev-<sha>` preview for a moving branch, which is the
 prefix opencode's own `Script` helper reads as a preview.
 
@@ -170,7 +170,7 @@ That coupling is forced, not incidental:
   from a different `@opentui/core` is *missing calls* rather than merely out of
   date — it can load fine and then crash on first use of a new entry point.
 
-opencode v2 resolves `@opentui/core` 0.5.12, which added seven entry points the
+opencode v2 resolves `@opentui/core` 0.5.14, which added seven entry points the
 previously committed blob did not export:
 
 ```
