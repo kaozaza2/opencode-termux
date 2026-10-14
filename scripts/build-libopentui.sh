@@ -5,7 +5,7 @@ set -euo pipefail
 # of OpenTUI's native Zig core that the Termux binary dlopen()s at startup.
 #
 #   ./scripts/build-libopentui.sh              # version from the opencode checkout
-#   ./scripts/build-libopentui.sh 0.6.5       # explicit @opentui/core version
+#   ./scripts/build-libopentui.sh 0.5.12       # explicit @opentui/core version
 #
 # Requires: git, curl, tar, xz, node, unzip. Zig and the NDK are downloaded.
 # Needs ~4 GB of disk for the source, the NDK, Zig and the build cache.
@@ -39,7 +39,7 @@ set -euo pipefail
 #   was compiled from. The JS half resolves native entry points by name
 #   (createRenderer, imageCreateFromPixels, processKittyImageReply, ...), so a
 #   .so missing any of them either fails to load or calls into a symbol that
-#   does not exist. opencode v2 uses @opentui/core 0.6.5, whose Zig core
+#   does not exist. opencode v2 uses @opentui/core 0.5.12, whose Zig core
 #   exports 7 entry points the previously vendored blob did not have:
 #
 #     imageCreateFromPixels  imageUpdatePixels
@@ -72,7 +72,7 @@ if [ -z "${VERSION}" ]; then
   # from the JS that loads it.
   PKG="${REPO_DIR}/opencode/packages/cli/package.json"
   if [ ! -f "${PKG}" ]; then
-    echo "ERROR: pass the @opentui/core version explicitly, e.g. $0 0.6.5" >&2
+    echo "ERROR: pass the @opentui/core version explicitly, e.g. $0 0.5.12" >&2
     echo "       (no opencode checkout at ${PKG} to read it from)" >&2
     exit 1
   fi
@@ -293,10 +293,9 @@ fi
 # fine and then fails at first call. Check the ones this version is known to
 # have added, so a stale blob cannot be committed by accident.
 missing=""
-for sym in ot_session_attach_renderer_with_env ot_session_process_kitty_image_reply \
-  ot_image_create_pixels ot_image_update_pixels \
-  ot_session_cancel_kitty_image_transport ot_session_get_kitty_image_transport \
-  ot_session_poll_kitty_image_transport ot_session_set_kitty_image_transport; do
+for sym in createRenderer processKittyImageReply imageCreateFromPixels \
+  imageUpdatePixels cancelKittyImageTransport getKittyImageTransport \
+  pollKittyImageTransport setKittyImageTransport; do
   if ! grep -qa "${sym}" "${BUILT}"; then
     missing="${missing} ${sym}"
   fi
@@ -314,17 +313,8 @@ mkdir -p "$(dirname "${DEST}")"
 # exact optimized code, and leaves stripping to whoever packages it. Stripping
 # drops .symtab but keeps .dynsym, which is what the JS binds against.
 # binutils is absent on some hosts (Termux); zig's objcopy cannot strip ELF.
-STRIP_BIN=""
-for cand in llvm-strip aarch64-linux-gnu-strip aarch64-none-linux-gnu-strip; do
-  if command -v "${cand}" >/dev/null 2>&1; then
-    STRIP_BIN="${cand}"
-    break
-  fi
-done
-if [ -n "${STRIP_BIN}" ]; then
-  "${STRIP_BIN}" --strip-unneeded -o "${DEST}" "${BUILT}"
-elif command -v strip >/dev/null 2>&1; then
-  strip --strip-unneeded -o "${DEST}" "${BUILT}" 2>/dev/null || cp -f "${BUILT}" "${DEST}"
+if command -v strip >/dev/null 2>&1; then
+  strip --strip-unneeded -o "${DEST}" "${BUILT}"
 else
   echo "--- WARNING: no strip(1); installing unstripped (~$(du -h "${BUILT}" | cut -f1) with debug_info)" >&2
   cp -f "${BUILT}" "${DEST}"
@@ -339,7 +329,7 @@ echo "=== Installed ${DEST} (@opentui/core ${VERSION}) ==="
 ls -la "${DEST}"
 # Re-check after stripping: --strip-unneeded must not have taken .dynsym with it.
 missing=""
-for sym in ot_session_attach_renderer_with_env ot_session_process_kitty_image_reply; do
+for sym in createRenderer processKittyImageReply; do
   grep -qa "${sym}" "${DEST}" || missing="${missing} ${sym}"
 done
 if [ -n "${missing}" ]; then

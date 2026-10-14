@@ -1,8 +1,8 @@
 diff --git a/install b/install
-index feb66da..c02027e 100755
+index b17ccfd..b3758ec 100755
 --- a/install
 +++ b/install
-@@ -108,6 +108,13 @@ else
+@@ -100,6 +100,13 @@ else
        fi
      fi
  
@@ -15,8 +15,8 @@ index feb66da..c02027e 100755
 +
      combo="$os-$arch"
      case "$combo" in
-       linux-x64|linux-arm64|darwin-x64|darwin-arm64|windows-x64|windows-arm64)
-@@ -119,7 +126,7 @@ else
+       linux-x64|linux-arm64|darwin-x64|darwin-arm64|windows-x64)
+@@ -111,7 +118,7 @@ else
      esac
  
      is_musl=false
@@ -25,7 +25,7 @@ index feb66da..c02027e 100755
        if [ -f /etc/alpine-release ]; then
          is_musl=true
        fi
-@@ -165,6 +172,9 @@ else
+@@ -157,6 +164,9 @@ else
      if [ "$needs_baseline" = "true" ]; then
        target="$target-baseline"
      fi
