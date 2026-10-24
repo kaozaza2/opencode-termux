@@ -16,10 +16,15 @@ FROM ubuntu:26.04
 
 # xz: zig ships as .tar.xz.
 # unzip: the script extracts the NDK sysroot from its zip.
-# binutils: readelf/strip, used by the script's bionic + export checks.
+# binutils: readelf, used by the script's bionic check.
+# binutils-aarch64-linux-gnu: aarch64-linux-gnu-strip. The native `strip` in
+# this image has no aarch64 BFD target ("invalid bfd target"), and the blob the
+# script wants is a 22 MB aarch64 ELF with debug info; without the cross
+# toolchain it would be vendored unstripped.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       binutils \
+      binutils-aarch64-linux-gnu \
       curl \
       git \
       tar \
@@ -35,6 +40,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
 WORKDIR /workspace
 
 COPY scripts ./scripts
+COPY patches ./patches
 RUN chmod +x scripts/build-libopentui.sh
 
 # Empty by default: the script reads the version from the opencode checkout when

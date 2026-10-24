@@ -23,7 +23,7 @@ point.
 `@opentui/core` moves fast: 0.5.x had a flat renderer API (`createRenderer`,
 `render`, `imageCreateFromPixels`, ...), and 0.6.x replaced it with the `ot_*`
 Context ABI generated from `include/opentui.h`, plus audio, stream and yoga
-entry points — 433 symbols at 0.6.8.
+entry points — 345 symbols required by the 0.6.8 dlopen tables.
 
 So **bump `@opentui/core` and rebuild this file.** To regenerate:
 

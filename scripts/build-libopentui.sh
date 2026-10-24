@@ -314,14 +314,19 @@ required_symbols() {
     const [nativeDir, coreSrc] = process.argv.slice(2)
     const names = new Set()
 
-    // ot_* declarations in the C ABI header, including multi-line ones.
+    // ot_* declarations in the C ABI header, including multi-line ones. Comments
+    // must go first: a `*/` prose line like "... carries ot_scene_style_property
+    // (40 bytes total)" would otherwise match name + `(` and assert a function
+    // that only exists as a struct layout.
     const header = fs.readFileSync(nativeDir + "/include/opentui.h", "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .split("\n").map((l) => (/\/\//.test(l) ? l.slice(0, l.indexOf("//")) : l)).join("\n")
     for (const m of header.matchAll(/\b(ot_[a-z0-9_]+)\s*\(/g)) names.add(m[1])
 
     const zig = fs.readFileSync(coreSrc + "/zig.ts", "utf8")
     const abi = fs.readFileSync(coreSrc + "/native-abi.generated.ts", "utf8")
 
-    // Keys of a "<indent>name: {" table inside [from, until] of `text`.
+    // Keys of a "<indent>name: {" table inside [from, until) of `text`.
     const keys = (text, from, until, indent) => {
       const start = text.indexOf(from)
       if (start < 0) return []
@@ -331,7 +336,14 @@ required_symbols() {
       return [...slice.matchAll(new RegExp("(?:^|\n)" + indent + "(\\w+): \\{", "g"))].map((m) => m[1])
     }
 
-    for (const k of keys(abi, "export const nativeSymbols = {", "\n}\n", "  ")) names.add(k)
+    // nativeSymbols is the exported-function table the generator emits, and it
+    // (like every table in this generated file) closes with "} as const". The
+    // "\n}\n" terminator this used to look for does not exist, which made the
+    // slice run to end of file and pull in nativeCallbacks and nativeLayouts:
+    // callback typedefs and struct layouts the JS never dlsym()s, so the vendored
+    // .so rightly does not export them. 22 false failures on @opentui/core 0.6.8.
+
+    for (const k of keys(abi, "export const nativeSymbols = {", "\n} as const", "  ")) names.add(k)
     for (const k of keys(zig, "const yogaSymbols = {", "\n} as const", "  ")) names.add(k)
     for (const k of keys(zig, "dlopen(resolvedLibPath, {", "\n  })", "    ")) names.add(k)
 
@@ -368,10 +380,21 @@ mkdir -p "$(dirname "${DEST}")"
 # exact optimized code, and leaves stripping to whoever packages it. Stripping
 # drops .symtab but keeps .dynsym, which is what the JS binds against.
 # binutils is absent on some hosts (Termux); zig's objcopy cannot strip ELF.
-if command -v strip >/dev/null 2>&1; then
-  strip --strip-unneeded -o "${DEST}" "${BUILT}"
+# Host strip(1) usually cannot parse an aarch64 ELF either: Ubuntu's native
+# binutils ships no aarch64 BFD target ("invalid bfd target"); the cross build
+# lives in binutils-aarch64-linux-gnu. Prefer it, fall back to a probe of plain
+# strip, and keep the blob unstripped when neither can handle the target.
+if command -v aarch64-linux-gnu-strip >/dev/null 2>&1; then
+  aarch64-linux-gnu-strip --strip-unneeded -o "${DEST}" "${BUILT}"
+elif command -v llvm-strip >/dev/null 2>&1; then
+  # LLVM's strip parses every target; Termux and the NDK both ship it.
+  llvm-strip --strip-unneeded -o "${DEST}" "${BUILT}"
+elif strip --strip-unneeded -o "${DEST}" "${BUILT}" 2>/dev/null; then
+  :
 else
-  echo "--- WARNING: no strip(1); installing unstripped (~$(du -h "${BUILT}" | cut -f1) with debug_info)" >&2
+  rm -f "${DEST}"
+  echo "--- WARNING: no strip(1) that parses aarch64 ELF; install binutils-aarch64-linux-gnu," >&2
+  echo "---          or accept the unstripped blob (~$(du -h "${BUILT}" | cut -f1) with debug_info)" >&2
   cp -f "${BUILT}" "${DEST}"
 fi
 chmod +x "${DEST}"
