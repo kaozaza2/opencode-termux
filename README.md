@@ -11,7 +11,7 @@ same file works on both — there is no per-package-manager build.
 
 ```bash
 curl -fsSL \
-  https://github.com/kaozaza2/opencode-termux/releases/latest/download/opencode-termux-2.0.24.tar.gz \
+  https://github.com/kaozaza2/opencode-termux/releases/latest/download/opencode-termux-2.1.4.tar.gz \
   | tar -xz -C $PREFIX/bin
 opencode
 ```
@@ -28,13 +28,13 @@ here target `packages/cli/script/build.ts` and do not apply to v1.
 | Ref | What it is |
 | --- | --- |
 | `latest` | the highest published `v2.x.y` tag — **the default** |
-| `v2.0.24` | one specific release, fixed |
+| `v2.1.4` | one specific release, fixed |
 | `v2` | the v2 branch head, moves |
 | `2.0` | **not v2** — a stale exploration branch still on `packages/opencode` 1.x |
 | `dev` | v1 |
 
 A tag is the default so rebuilding a version reproduces the same binary. The
-version comes from whatever was checked out: the tag for a tag (`v2.0.24` →
+version comes from whatever was checked out: the tag for a tag (`v2.1.4` →
 `2.0.18`), and a `0.0.0-dev-<sha>` preview for a moving branch, which is the
 prefix opencode's own `Script` helper reads as a preview.
 
@@ -170,23 +170,17 @@ That coupling is forced, not incidental:
   from a different `@opentui/core` is *missing calls* rather than merely out of
   date — it can load fine and then crash on first use of a new entry point.
 
-opencode v2 resolves `@opentui/core` 0.5.17, which added seven entry points the
-previously committed blob did not export:
-
-```
-imageCreateFromPixels   imageUpdatePixels
-processKittyImageReply  cancelKittyImageTransport
-getKittyImageTransport  pollKittyImageTransport
-setKittyImageTransport
-```
-
-So **when `@opentui/core` is bumped, rebuild the blob** with
-`./scripts/build-libopentui.sh` (see `vendor/README.md`). It refuses to install
-a `.so` that links glibc or that is missing those exports, so a stale blob
-cannot be committed by accident. `build.sh` additionally compares
-`vendor/@opentui/core-linux-arm64/VERSION` against the version the checkout
-resolves and refuses to build on a mismatch, so the failure cannot reach a
-phone.
+`@opentui/core` moves fast: 0.5.x exposed a flat renderer API (`createRenderer`,
+`imageCreateFromPixels`, ...), and 0.6.x replaced it with the `ot_*` Context ABI
+generated from `include/opentui.h`, plus audio, stream and yoga entry points —
+433 symbols at 0.6.8. So **when `@opentui/core` is bumped, rebuild the blob**
+with `./scripts/build-libopentui.sh` (see `vendor/README.md`). Its checks derive
+the required symbol set from the checkout itself — from `opentui.h` and the
+tables `opentui`'s JS `dlopen()`s — so they cannot go stale. They refuse to
+install a `.so` that links glibc or that is missing any of those exports.
+`build.sh` additionally compares `vendor/@opentui/core-linux-arm64/VERSION`
+against the version the checkout resolves and refuses to build on a mismatch,
+so the failure cannot reach a phone.
 
 The blob carries a third constraint that is not about `@opentui/core` at all: it
 is a Zig build, so its `threadlocal` variables need a dynamic linker that

@@ -22,7 +22,7 @@ build with its own toolchain; see `vendor/README.md`.
 v2 relocated the binary package from `packages/opencode` to `packages/cli` and
 rewrote the build script, so these patches no longer apply to a v1 checkout.
 The v1 forms touched `packages/opencode/script/build.ts`; these touch
-`packages/cli/script/build.ts`. Verified against `v2.0.16`.
+`packages/cli/script/build.ts`. Verified against `v2.1.4`.
 
 ## These patches are load-bearing
 

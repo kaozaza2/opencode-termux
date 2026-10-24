@@ -5,7 +5,7 @@ set -euo pipefail
 # of OpenTUI's native Zig core that the Termux binary dlopen()s at startup.
 #
 #   ./scripts/build-libopentui.sh              # version from the opencode checkout
-#   ./scripts/build-libopentui.sh 0.5.12       # explicit @opentui/core version
+#   ./scripts/build-libopentui.sh 0.6.8       # explicit @opentui/core version
 #
 # Requires: git, curl, tar, xz, node, unzip. Zig and the NDK are downloaded.
 # Needs ~4 GB of disk for the source, the NDK, Zig and the build cache.
@@ -39,17 +39,17 @@ set -euo pipefail
 #   was compiled from. The JS half resolves native entry points by name
 #   (createRenderer, imageCreateFromPixels, processKittyImageReply, ...), so a
 #   .so missing any of them either fails to load or calls into a symbol that
-#   does not exist. opencode v2 uses @opentui/core 0.5.12, whose Zig core
-#   exports 7 entry points the previously vendored blob did not have:
+#   does not exist. opencode v2 pins @opentui/core via its workspace catalog
+#   (see the catalog entry for the version), and each bump changes the ABI:
 #
-#     imageCreateFromPixels  imageUpdatePixels
-#     processKittyImageReply cancelKittyImageTransport
-#     getKittyImageTransport pollKittyImageTransport
-#     setKittyImageTransport
+#     0.5.12 added seven entry points the previous blob did not have
+#     0.6.x replaced the flat renderer API with the ot_* Context ABI generated
+#           from include/opentui.h, plus audio/stream/yoga entry points
 #
 #   So bump @opentui/core and this blob goes stale. build.sh will happily copy a
 #   stale .so into the binary and the failure only shows up as a dlopen error on
-#   the phone, so the checks at the bottom of this script matter.
+#   the phone. The checks at the bottom of this script derive the required
+#   symbol set from the checked out source itself, so they cannot go stale.
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="${OPENTUI_BUILD_DIR:-${TMPDIR:-/tmp}/opentui-native-build}"
@@ -72,7 +72,7 @@ if [ -z "${VERSION}" ]; then
   # from the JS that loads it.
   PKG="${REPO_DIR}/opencode/packages/cli/package.json"
   if [ ! -f "${PKG}" ]; then
-    echo "ERROR: pass the @opentui/core version explicitly, e.g. $0 0.5.12" >&2
+    echo "ERROR: pass the @opentui/core version explicitly, e.g. $0 0.6.8" >&2
     echo "       (no opencode checkout at ${PKG} to read it from)" >&2
     exit 1
   fi
@@ -199,8 +199,12 @@ cp -a "${NDK_SYSROOT}/usr/include/aarch64-linux-android/." "${INC}/"
 # The shims sit outside the source tree, so they include by absolute path.
 printf '#define _Nullable\n#define _Nonnull\n#include "%s/src/vendor/miniaudio/miniaudio.h"\n' \
   "${SRC}/packages/native" >"${INC}/__opentui/miniaudio_shimmed.h"
-printf '#define _Nullable\n#define _Nonnull\n#include "%s/zig-deps/yoga/yoga/Yoga.h"\n' \
-  "${SRC}/packages/native" >"${INC}/__opentui/Yoga_shimmed.h"
+# 0.6.x routes the yoga translate-C through src/yoga-bridge.h, which pulls in
+# Yoga.h (<yoga/Yoga.h>, resolved from the zig dependency include path) plus
+# the bridge's own ot_Yoga declarations; shim that whole header, not just
+# Yoga.h, so the ot_Yoga* entry points keep their prototypes.
+printf '#define _Nullable\n#define _Nonnull\n#include "%s/src/yoga-bridge.h"\n' \
+  "${SRC}/packages/native" >"${INC}/__opentui/yoga_bridge_shimmed.h"
 
 # The libc config Zig reads for a target it cannot provide itself.
 cat >"${WORK}/bionic-libc.txt" <<EOF
@@ -290,21 +294,72 @@ else
 fi
 
 # The JS binds natives by symbol name, so a .so missing an entry point dlopens
-# fine and then fails at first call. Check the ones this version is known to
-# have added, so a stale blob cannot be committed by accident.
-missing=""
-for sym in createRenderer processKittyImageReply imageCreateFromPixels \
-  imageUpdatePixels cancelKittyImageTransport getKittyImageTransport \
-  pollKittyImageTransport setKittyImageTransport; do
-  if ! grep -qa "${sym}" "${BUILT}"; then
-    missing="${missing} ${sym}"
-  fi
-done
-if [ -n "${missing}" ]; then
-  echo "ERROR: built .so is missing expected exports:${missing}" >&2
+# fine and then fails at first call. Derive the exact required set from the
+# checked out @opentui/core instead of keeping a hand-copied list, so the check
+# cannot go stale when @opentui/core is bumped:
+#
+#   include/opentui.h                  declares every ot_* ABI function (the JS
+#                                      table native-abi.generated.ts is
+#                                      generated from it)
+#   packages/core/src/native-abi.generated.ts
+#                                      what bun dlopen()s for the ot_* surface;
+#                                      parsed as the generator's own output
+#   packages/core/src/zig.ts           the extra dlopen entries (logging,
+#                                      audio, native span feed) and yogaSymbols
+required_symbols() {
+  local native="$1" core_src="$2" script
+  script="$((mktemp -d) 2>/dev/null)/symbols.js"
+  cat >"${script}" <<'NODE'
+    const fs = require("fs")
+    const [nativeDir, coreSrc] = process.argv.slice(2)
+    const names = new Set()
+
+    // ot_* declarations in the C ABI header, including multi-line ones.
+    const header = fs.readFileSync(nativeDir + "/include/opentui.h", "utf8")
+    for (const m of header.matchAll(/\b(ot_[a-z0-9_]+)\s*\(/g)) names.add(m[1])
+
+    const zig = fs.readFileSync(coreSrc + "/zig.ts", "utf8")
+    const abi = fs.readFileSync(coreSrc + "/native-abi.generated.ts", "utf8")
+
+    // Keys of a "<indent>name: {" table inside [from, until] of `text`.
+    const keys = (text, from, until, indent) => {
+      const start = text.indexOf(from)
+      if (start < 0) return []
+      const rest = text.slice(start)
+      const endMark = rest.indexOf(until)
+      const slice = endMark < 0 ? rest : rest.slice(0, endMark)
+      return [...slice.matchAll(new RegExp("(?:^|\n)" + indent + "(\\w+): \\{", "g"))].map((m) => m[1])
+    }
+
+    for (const k of keys(abi, "export const nativeSymbols = {", "\n}\n", "  ")) names.add(k)
+    for (const k of keys(zig, "const yogaSymbols = {", "\n} as const", "  ")) names.add(k)
+    for (const k of keys(zig, "dlopen(resolvedLibPath, {", "\n  })", "    ")) names.add(k)
+
+    console.log([...names].sort().join("\n"))
+NODE
+  node "${script}" "${native}" "${core_src}"
+  rm -f "${script}"
+}
+
+NATIVE_DIR="${SRC}/packages/native"
+CORE_SRC="${SRC}/packages/core/src"
+SYMBOLS="$(required_symbols "${NATIVE_DIR}" "${CORE_SRC}")"
+if [ -z "${SYMBOLS}" ]; then
+  echo "ERROR: derived no native symbols from the checkout; the parsing and the" >&2
+  echo "       @opentui/core layout have diverged - inspect and update this script." >&2
   exit 1
 fi
-echo "--- exports verified"
+count="$(printf '%s\n' "${SYMBOLS}" | wc -l)"
+missing=""
+for sym in ${SYMBOLS}; do
+  grep -qFa -- "${sym}" "${BUILT}" || missing="${missing} ${sym}"
+done
+if [ -n "${missing}" ]; then
+  echo "ERROR: built .so is missing required entry points (of the ${count} the dlopen tables ask for):" >&2
+  echo "       ${missing}" | fold -s -w 100 | sed 's/^/       /' >&2
+  exit 1
+fi
+echo "--- exports verified (all ${count} symbols from the dlopen tables)"
 
 # ------------------------------------------------------------------- install
 DEST="${REPO_DIR}/vendor/@opentui/core-linux-arm64/libopentui.so"
@@ -329,8 +384,8 @@ echo "=== Installed ${DEST} (@opentui/core ${VERSION}) ==="
 ls -la "${DEST}"
 # Re-check after stripping: --strip-unneeded must not have taken .dynsym with it.
 missing=""
-for sym in createRenderer processKittyImageReply; do
-  grep -qa "${sym}" "${DEST}" || missing="${missing} ${sym}"
+for sym in ${SYMBOLS}; do
+  grep -qFa -- "${sym}" "${DEST}" || missing="${missing} ${sym}"
 done
 if [ -n "${missing}" ]; then
   echo "ERROR: installed .so lost exports during stripping:${missing}" >&2

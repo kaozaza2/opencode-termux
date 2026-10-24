@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="${SCRIPT_DIR}/opencode"
 
 OPENCODE_REPO="${OPENCODE_REPO:-https://github.com/anomalyco/opencode.git}"
-OPENCODE_REF="${OPENCODE_REF:-v2.0.24}"
+OPENCODE_REF="${OPENCODE_REF:-v2.1.4}"
 
 # One target, four names. The last two differ because build.ts derives the dist
 # dir with targetName().replace("opencode","cli") and the installer resolves
