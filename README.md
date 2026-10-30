@@ -1,207 +1,274 @@
 # opencode-termux
 
-Pre-built [opencode](https://github.com/anomalyco/opencode) binaries for Termux
-(Android), cross-compiled against **bionic** libc.
+Run [opencode](https://github.com/anomalyco/opencode) natively on your Android
+phone with [Termux](https://termux.dev).
 
-## What you get
+Upstream opencode only ships glibc and musl builds for Linux, and neither of
+those runs on Android. This repo patches opencode's build so it can be
+cross-compiled against Android's own libc (bionic), and publishes the result as
+a single ready-to-run binary.
 
-One tarball, `opencode-termux-<version>.tar.gz`, containing a single aarch64
-binary. Stock Termux (`apt`/`pkg`) and termux-pacman both run on bionic, so the
-same file works on both — there is no per-package-manager build.
+> [!NOTE]
+> This is an unofficial, community-maintained build. Please report problems
+> with the Termux build here, not to the opencode project.
+
+## Installation
+
+There are two ways to get the binary. Both give you the same file:
+`opencode-termux-<version>.tar.gz`, which contains a single `opencode`
+executable. It works on both stock Termux (`pkg`/`apt`) and termux-pacman,
+since they both sit on bionic.
+
+### From a release (recommended)
+
+Grab a tarball from the
+[Releases](https://github.com/kaozaza2/opencode-termux/releases) page and
+extract it into `$PREFIX/bin`:
 
 ```bash
 curl -fsSL \
   https://github.com/kaozaza2/opencode-termux/releases/latest/download/opencode-termux-2.1.4.tar.gz \
   | tar -xz -C $PREFIX/bin
+
 opencode
 ```
 
-No 32-bit ARM build (Bun ships no armv7 runtime) and no x86_64 build (the
-patched target list has exactly one bionic entry, `linux/arm64`).
+Swap `2.1.4` for whichever version you want.
 
-## Upstream ref
+### From a CI build artifact
 
-These builds track **opencode v2**, which moved the binary package from
-`packages/opencode` to `packages/cli` and rewrote its build script. The patches
-here target `packages/cli/script/build.ts` and do not apply to v1.
+Every successful run of the
+[build workflow](https://github.com/kaozaza2/opencode-termux/actions/workflows/opencode-termux.yml)
+uploads the tarball as an artifact named `opencode-tarball`, even when no
+release is made. This is the way to try a build from `master` or `dev` before
+it's released. Artifacts are kept for 30 days, and you need to be signed in to
+GitHub to download them.
 
-| Ref | What it is |
-| --- | --- |
-| `latest` | the highest published `v2.x.y` tag — **the default** |
-| `v2.1.4` | one specific release, fixed |
-| `v2` | the v2 branch head, moves |
-| `2.0` | **not v2** — a stale exploration branch still on `packages/opencode` 1.x |
-| `dev` | v1 |
-
-A tag is the default so rebuilding a version reproduces the same binary. The
-version comes from whatever was checked out: the tag for a tag (`v2.1.4` →
-`2.0.18`), and a `0.0.0-dev-<sha>` preview for a moving branch, which is the
-prefix opencode's own `Script` helper reads as a preview.
-
-## Building
+The easiest route is the [GitHub CLI](https://cli.github.com), which is
+available in Termux:
 
 ```bash
-./build.sh                 # newest v2 release
-./build.sh 0.0.0-dev-local # override the version string
+pkg install gh
+gh auth login
+
+# Download the tarball from the latest successful run on master
+RUN_ID=$(gh run list -R kaozaza2/opencode-termux \
+  -w opencode-termux.yml -b master -s success -L 1 \
+  --json databaseId -q '.[0].databaseId')
+gh run download "$RUN_ID" -R kaozaza2/opencode-termux -n opencode-tarball
+
+tar -xzf opencode-termux-*.tar.gz -C $PREFIX/bin
+opencode
 ```
 
-`build.sh` does the whole job: it clones, installs, applies the patches and
-cross-compiles. Nothing arm64 executes, so the host can be anything Bun
-cross-compiles from.
+You can also download it from a browser: open a run on the
+[Actions](https://github.com/kaozaza2/opencode-termux/actions) tab and click
+`opencode-tarball` under **Artifacts**. GitHub delivers it as a `.zip`, so
+unzip it first and then extract the tarball inside:
 
-In Docker:
+```bash
+unzip opencode-tarball.zip
+tar -xzf opencode-termux-*.tar.gz -C $PREFIX/bin
+```
+
+### Requirements
+
+- An **aarch64** (arm64) device. There's no 32-bit ARM build because Bun has no
+  armv7 runtime, and no x86_64 build.
+- **Android 11 or newer.** The TUI's native library needs a dynamic linker that
+  supports TLS descriptors, which bionic only gained in Android 11. On older
+  versions the TUI crashes on startup with `Segmentation fault at address 0x0`.
+
+### Known limitations
+
+- **No browser UI for `opencode serve`.** The web assets add tens of megabytes
+  and are left out by default. The server itself runs fine. If you need the UI,
+  build with `BUILD_WEB_UI=1`.
+- **No file watcher addon.** `@parcel/watcher` has no Android build, so opencode
+  falls back to `node:fs` for watching files.
+- **PTY support needs an external helper.** `@opencode-ai/pty` has no Android
+  build either. opencode will use an `opencode-pty` binary if it finds one on
+  your `PATH`.
+- **Can't test the TUI in `termux-docker`.** That image ships an old Android
+  linker without TLS descriptor support, so the TUI crashes there even though it
+  works on a real device. See [vendor/README.md](vendor/README.md#it-needs-a-loader-that-implements-tlsdesc)
+  for details.
+
+## Building from source
+
+You don't need an Android device to build. Bun does the cross-compiling, so any
+Linux host that Bun supports will do. Node.js 22 or newer is needed for native
+postinstall scripts.
+
+```bash
+git clone https://github.com/kaozaza2/opencode-termux
+cd opencode-termux
+./build.sh
+```
+
+`build.sh` clones opencode, installs dependencies, applies the patches and
+compiles the binary. Then package it with:
+
+```bash
+./package.sh   # writes out/opencode-termux-<version>.tar.gz
+```
+
+You can also pass a version string to override the one baked into the binary:
+
+```bash
+./build.sh 0.0.0-dev-local
+```
+
+### With Docker
 
 ```bash
 docker build -t opencode-termux -f Dockerfile.build .
 docker run --rm -v "$(pwd)/out:/workspace/out" opencode-termux
 ```
 
-Or with an explicit ref: `OPENCODE_REF=v2 ./build.sh`.
+### Choosing an opencode version
 
-### Environment
+Set `OPENCODE_REF` to build something other than the pinned default:
 
-| Variable | Default | Purpose |
+```bash
+OPENCODE_REF=latest ./build.sh   # newest v2.x.y release tag
+OPENCODE_REF=v2.1.4 ./build.sh   # a specific release
+OPENCODE_REF=v2 ./build.sh       # tip of the v2 branch
+```
+
+Only opencode **v2** is supported. v2 moved the CLI from `packages/opencode` to
+`packages/cli` and rewrote the build script, and the patches here target the new
+layout. In particular, the upstream `2.0` and `dev` branches are still v1 code,
+despite the name, and won't build.
+
+Release tags produce their own version number (`v2.1.4` becomes `2.1.4`).
+Branches get a preview version like `0.0.0-dev-<sha>`.
+
+### Configuration
+
+All options are environment variables:
+
+| Variable | Default | Description |
 | --- | --- | --- |
-| `OPENCODE_REPO` | `github.com/anomalyco/opencode` | source repo |
-| `OPENCODE_REF` | `latest` | tag, branch, or `latest` |
-| `VERSION` | derived from the checkout | version string baked in |
-| `BUN_VERSION` | the version the checkout pins | see [Bun](#the-bun-version-is-a-runtime-choice) |
-| `BUN_INSTALL_BACKEND` | `hardlink` | set `copyfile` to avoid hardlinks |
-| `BUILD_WEB_UI` | `0` | `1` embeds the app assets |
-| `SKIP_CLONE` | unset | `1` requires an existing `./opencode` |
+| `OPENCODE_REPO` | `https://github.com/anomalyco/opencode.git` | Repository to clone |
+| `OPENCODE_REF` | `v2.1.4` | Tag, branch, or `latest` |
+| `VERSION` | from the checkout | Version string baked into the binary |
+| `BUN_VERSION` | the version opencode pins | Bun used to compile (see below) |
+| `BUN_INSTALL_BACKEND` | `hardlink` | Set to `copyfile` if hardlinks misbehave |
+| `BUILD_WEB_UI` | `0` | Set to `1` to embed the `opencode serve` web UI |
+| `SKIP_CLONE` | unset | Set to `1` to reuse an existing `./opencode` checkout |
 
-## How it works
+A couple of these deserve a closer look.
 
-### One target, four names
-
-This is the part that is easy to get wrong, because the same target is spelled
-four different ways:
-
-| Role | Name |
-| --- | --- |
-| build target (`--target=`) | `opencode-linux-arm64-android` |
-| Bun compile target | `bun-linux-arm64-android` |
-| dist directory | `packages/cli/dist/cli-linux-arm64-android/bin/opencode` |
-| npm package | `@opencode/cli-linux-arm64-android` |
-
-The last two differ from the first two because `build.ts` derives the dist
-directory with `targetName(item).replace("opencode", "cli")`, and the `install`
-script resolves `@opencode/cli-<target>` from npm. `build.sh` and `package.sh`
-both reproduce the spellings so the release names line up with upstream.
-
-`--target=` only exists in v2. Under v1 the build script had no target filter,
-so every run compiled the full twelve-target matrix and threw eleven of them
-away; that is why CI is now roughly a third of its old cost.
-
-### Three bionic gaps
-
-1. **The resolver.** A Bun android binary reports `process.platform` as
-   `"android"`, but `@opentui/core` accepts only `linux`/`darwin`/`win32` and
-   throws `Unsupported OpenTUI Node asset target: android-arm64`.
-   `patches/common/opentui-android.patch` rewrites those reads to `"linux"` in
-   `@opentui/core`'s own chunks from a `Bun.build` plugin. It has to be a plugin:
-   a `define` for `process.platform` is silently ignored, because when bun
-   cross-compiles to android it folds the platform in itself and its constant
-   wins. The build fails if the plugin matches nothing, so an `@opentui/core`
-   that stops reading `process.platform` cannot ship a broken binary.
-
-2. **The render library.** The npm `libopentui.so` is a glibc build needing
-   `libm.so.6` / `libc.so.6` / `libdl.so.2` and cannot be `dlopen()`ed on bionic,
-   so `build.sh` swaps in a bionic build from `vendor/`. See
-   [Known limitation](#known-limitation).
-
-3. **The other addons.** `@opencode-ai/pty` (v2's replacement for
-   `@ff-labs/fff-bun`) and `@parcel/watcher` publish only glibc/musl builds.
-   `android-target.patch` leaves both unset, so the runtime falls back to an
-   `opencode-pty` on `PATH` and to `node:fs` respectively.
-
-`patches/README.md` documents each patch, and `patches/common/android-target.patch`
-is load-bearing: without it `--target=` matches nothing and the build exits 0
-having produced nothing.
-
-### The Bun version is a runtime choice
-
-`bun build --compile` embeds the compiling Bun's runtime into the binary, so it
-decides what actually runs on your phone.
-
-It is not a free choice: `@opencode/script` reads the checkout's
-`packageManager` field and throws unless the running Bun satisfies
-`^<that version>`. `build.sh` reads the pin from the checkout rather than
-hardcoding it, so it cannot drift as upstream moves. Override within the range
-to bisect a regression:
+**`BUN_VERSION`** matters more than it looks. `bun build --compile` embeds the
+Bun runtime into the binary, so this is the runtime that actually runs on your
+phone. opencode requires a Bun compatible with the version in its
+`packageManager` field, and `build.sh` reads that pin from the checkout. You can
+still override it within that range, which is handy for bisecting a regression:
 
 ```bash
 BUN_VERSION=1.4.3 ./build.sh
 ```
 
-### The app assets are skipped by default
+**`BUN_INSTALL_BACKEND`** exists because `bun install` sometimes reports success
+but leaves empty package directories behind, particularly on filesystems where
+hardlinks are flaky (Android's f2fs, for example). The build later fails with
+something confusing like `Could not resolve drizzle-orm`. `build.sh` checks for
+this and retries once with `--backend=copyfile` automatically, but you can start
+with `copyfile` to skip the problem entirely.
 
-The embedded app assets are a brotli bundle of the vite build of `packages/app`,
-cost tens of MB, and are only used by `opencode serve`'s browser UI. They are
-off by default, so `opencode serve` still runs but its browser UI will not load.
-Enable with `BUILD_WEB_UI=1 ./build.sh`.
+## How it works
 
-### It heals a broken install
+Getting opencode onto bionic takes three fixes.
 
-`bun install` can report success while leaving store entries with a directory
-skeleton and no files. The symptom shows up much later as
-`Could not resolve drizzle-orm`, from a build that has already moved on. It
-happens where Bun's default hardlink backend is unreliable — Android's f2fs
-among them.
+1. **Adding an Android target.** opencode's build script doesn't know about
+   Android, so [`android-target.patch`](patches/common/android-target.patch)
+   adds a `linux/arm64` bionic entry, compiled with Bun's
+   `bun-linux-arm64-android` target. Without this patch, the build silently
+   matches no targets, exits successfully, and produces nothing.
 
-So `build.sh` checks that everything the compile imports actually resolves, and
-on failure drops the empty store entries and reinstalls once with
-`--backend=copyfile`. If that does not help it fails loudly rather than handing
-an opaque bundler error to the next step. To skip hardlinks from the start:
+2. **Convincing OpenTUI that Android is Linux.** A Bun Android binary reports
+   `process.platform` as `"android"`, which `@opentui/core` rejects with
+   `Unsupported OpenTUI Node asset target: android-arm64`.
+   [`opentui-android.patch`](patches/common/opentui-android.patch) rewrites
+   those checks to `"linux"` at bundle time using a `Bun.build` plugin. (A
+   simple `define` doesn't work, because Bun inlines the platform itself when
+   cross-compiling and its value wins.) The build fails if the plugin finds
+   nothing to rewrite, so an OpenTUI update can't quietly ship a broken binary.
+
+3. **Swapping in a bionic `libopentui.so`.** The TUI renderer is a native Zig
+   library, and the copy on npm is linked against glibc, so Android can't load
+   it. This repo ships its own bionic build in
+   [`vendor/`](vendor/README.md) and swaps it in during the build.
+
+There's also [`install-termux.patch`](patches/common/install-termux.patch),
+which teaches opencode's `install` script to detect Termux and fetch the
+`-android` package. Every patch is described in
+[patches/README.md](patches/README.md).
+
+### Target naming
+
+The same target goes by four different names depending on where you look,
+which is easy to trip over:
+
+| Where | Name |
+| --- | --- |
+| `build.ts --target=` | `opencode-linux-arm64-android` |
+| Bun compile target | `bun-linux-arm64-android` |
+| Output path | `packages/cli/dist/cli-linux-arm64-android/bin/opencode` |
+| npm package | `@opencode/cli-linux-arm64-android` |
+
+The scripts here follow upstream's conventions so the release names line up.
+
+## Updating the vendored libopentui
+
+`@opentui/core` changes quickly, and its JavaScript side binds to the native
+library by symbol name. A `libopentui.so` built from a different version might
+load fine and then crash the first time it hits a function that doesn't exist.
+For that reason, the vendored library must match the exact `@opentui/core`
+version opencode resolves.
+
+`build.sh` enforces this. It compares
+`vendor/@opentui/core-linux-arm64/VERSION` against the checkout and refuses to
+build if they differ. When that happens, rebuild the library:
 
 ```bash
-BUN_INSTALL_BACKEND=copyfile ./build.sh
+./scripts/build-libopentui.sh
 ```
 
-## The vendored native library
+The script checks that the result doesn't link glibc and that it exports every
+symbol the JS side expects, using the headers in the checkout itself. See
+[vendor/README.md](vendor/README.md) for the full process.
 
-`vendor/@opentui/core-linux-arm64/libopentui.so` is a bionic build of OpenTUI's
-Zig core, compiled from the exact `@opentui/core` version opencode resolves.
-That coupling is forced, not incidental:
+## Continuous integration
 
-- The npm `@opentui/core-linux-arm64` `.so` is a glibc build needing
-  `libm.so.6`/`libc.so.6`/`libdl.so.2`, so it cannot be `dlopen()`ed on Android.
-- The JS half binds native entry points **by symbol name**, so a `.so` built
-  from a different `@opentui/core` is *missing calls* rather than merely out of
-  date — it can load fine and then crash on first use of a new entry point.
+The [GitHub Actions workflow](.github/workflows/opencode-termux.yml) builds and
+packages the binary on every push to `master` or `dev` that touches the build
+files. It can also be started manually, with these inputs:
 
-`@opentui/core` moves fast: 0.5.x exposed a flat renderer API (`createRenderer`,
-`imageCreateFromPixels`, ...), and 0.6.x replaced it with the `ot_*` Context ABI
-generated from `include/opentui.h`, plus audio, stream and yoga entry points —
-433 symbols at 0.6.8. So **when `@opentui/core` is bumped, rebuild the blob**
-with `./scripts/build-libopentui.sh` (see `vendor/README.md`). Its checks derive
-the required symbol set from the checkout itself — from `opentui.h` and the
-tables `opentui`'s JS `dlopen()`s — so they cannot go stale. They refuse to
-install a `.so` that links glibc or that is missing any of those exports.
-`build.sh` additionally compares `vendor/@opentui/core-linux-arm64/VERSION`
-against the version the checkout resolves and refuses to build on a mismatch,
-so the failure cannot reach a phone.
+| Input | Description |
+| --- | --- |
+| `opencode_ref` | opencode tag or branch (default `latest`) |
+| `version` | Override the version string |
+| `bun_version` | Override the Bun version |
+| `with_web_ui` | Embed the `opencode serve` web UI |
+| `release` | Publish a GitHub release with the tarball |
 
-The blob carries a third constraint that is not about `@opentui/core` at all: it
-is a Zig build, so its `threadlocal` variables need a dynamic linker that
-implements `R_AARCH64_TLSDESC`. Bionic has since Android 11; an older `linker64`
-leaves the descriptors zeroed and the TUI dies with
-`Segmentation fault at address 0x0` on its first write to stdout.
-`termux/termux-docker` ships such a linker, so the TUI cannot be exercised there
-— see [vendor/README.md](vendor/README.md#it-needs-a-loader-that-implements-tlsdesc)
-for the twenty-line reproduction and what a fix would take.
+As a sanity check, CI verifies that the output is a real Android ELF (its
+program interpreter must be `/system/bin/linker64`), so a mis-targeted build
+fails instead of getting released.
 
-## GitHub Actions
+## Contributing
 
-`.github/workflows/opencode-termux.yml` builds once and packages the single
-tarball. It runs on push to `master`/`dev` when the build files change, or
-manually via `workflow_dispatch`.
+Issues and pull requests are welcome. If a new opencode release breaks the
+build, the usual suspects are the patches in [`patches/`](patches) and the
+vendored `libopentui.so`. Please include the opencode ref and the build log
+when reporting a failure.
 
-`build.sh` writes the version it resolved to `$GITHUB_OUTPUT`, so the packaging
-and release jobs cannot drift from the binary that was actually built. The build
-also asserts its output is an Android ELF by looking for the
-`/system/bin/linker64` program interpreter, so a mis-targeted build fails
-instead of shipping.
+## Acknowledgements
 
-Inputs: `opencode_ref` (default `latest`), `version`, `bun_version`,
-`with_web_ui`, `release`.
+- [opencode](https://github.com/anomalyco/opencode), the AI coding agent this
+  project packages
+- [OpenTUI](https://github.com/sst/opentui), the terminal UI library behind it
+- [Bun](https://bun.sh), which makes cross-compiling to Android possible
+- [Termux](https://termux.dev), for making Android a real Linux environment
