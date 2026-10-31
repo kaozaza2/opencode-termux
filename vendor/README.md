@@ -51,10 +51,13 @@ slots, OpenTUI's yoga measure slots, and the vendored C libraries.
 
 A loader that does not implement `R_AARCH64_TLSDESC` leaves those descriptors
 zeroed, and the first threadlocal access in the object then does `blr` on a null
-resolver: `Segmentation fault at address 0x0`, before any TUI frame. Bionic grew
-TLSDESC in 2019, so Android 11 and newer are fine; an older `linker64` is not.
-`termux/termux-docker` currently ships one that predates it, which is why the
-TUI cannot be exercised in that container — see
+resolver: `Segmentation fault at address 0x0`, before any TUI frame. Since
+@opentui/core 0.6 that access happens at import: its `setLogCallback` calls
+`std.Thread.getCurrentId()`, which reads a threadlocal, so even
+`opencode --version` crashes on such a loader. Bionic grew TLSDESC in 2019, so
+Android 11 and newer are fine; an older `linker64` is not.
+`termux/termux-docker` and `termux/termux-docker-pacman` ship the same one,
+which predates it, so the binary cannot be exercised in either container — see
 [the sigaction patch](#the-sigaction-patch-is-inert) for what is known and what
 is not.
 

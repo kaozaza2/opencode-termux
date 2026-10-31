@@ -1,8 +1,8 @@
 diff --git a/packages/cli/script/build.ts b/packages/cli/script/build.ts
-index 4d81321..e63dca3 100755
+index 4d81321..a1e2a9e 100755
 --- a/packages/cli/script/build.ts
 +++ b/packages/cli/script/build.ts
-@@ -165,6 +165,26 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
+@@ -165,6 +165,57 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
        }))
      },
    }
@@ -26,10 +26,51 @@ index 4d81321..e63dca3 100755
 +      })
 +    },
 +  }
++  // Android's allocator tags heap pointers in the top byte (0xb4...), which puts
++  // every malloc'd address above 2^53. @opentui/core takes native pointers as
++  // u64 and refuses any a JS number cannot hold, so the TUI dies on its first
++  // native allocation with "Pointer exceeds safe integer range". Turn tagging
++  // off from a module the entrypoint imports first, so it runs before anything
++  // allocates through OpenTUI. bionic still accepts frees of pointers it tagged
++  // earlier. -204 is M_BIONIC_SET_HEAP_TAGGING_LEVEL, 0 is
++  // M_HEAP_TAGGING_LEVEL_NONE.
++  let heapTaggingEntry = false
++  const androidHeapTaggingPlugin: BunPlugin = {
++    name: "android-heap-tagging",
++    setup(build) {
++      build.onResolve({ filter: /^opencode-android-heap-tagging$/ }, () => ({
++        path: "heap-tagging",
++        namespace: "opencode-android",
++      }))
++      build.onLoad({ filter: /^heap-tagging$/, namespace: "opencode-android" }, () => ({
++        loader: "js",
++        contents: `import { dlopen } from "bun:ffi"
++dlopen("libc.so", { mallopt: { args: ["i32", "i32"], returns: "i32" } }).symbols.mallopt(-204, 0)`,
++      }))
++      build.onLoad({ filter: /packages[/\\]cli[/\\]src[/\\]index\.ts$/ }, async (args) => {
++        heapTaggingEntry = true
++        // After the shebang, before every other import: ES modules evaluate
++        // their imports in order.
++        const source = await Bun.file(args.path).text()
++        const shebang = source.startsWith("#!") ? source.slice(0, source.indexOf("\n") + 1) : ""
++        return { loader: "ts", contents: `${shebang}import "opencode-android-heap-tagging"\n${source.slice(shebang.length)}` }
++      })
++    },
++  }
    const target = targetName(item)
    const name = target.replace(binary, "cli")
    const executablePath = await compileExecutable(item)
-@@ -180,6 +200,9 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
+@@ -173,6 +224,9 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
+     entrypoints: ["./src/index.ts", "./src/photon-worker.ts"],
+     tsconfig: "./tsconfig.json",
+     plugins: [
++      // First: onLoad goes to the first plugin whose filter matches, and this one
++      // must see src/index.ts (it has no JSX for solidPlugin to transform).
++      ...(item.android ? [androidHeapTaggingPlugin] : []),
+       appAssetsPlugin,
+       solidPlugin,
+       parcelWatcherPlugin,
+@@ -180,6 +234,9 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
        pluginRuntimePlugin,
        simulationGraphPlugin,
        modelsSnapshot,
@@ -39,7 +80,7 @@ index 4d81321..e63dca3 100755
      ],
      external: ["node-gyp"],
      format: "esm",
-@@ -222,6 +245,10 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
+@@ -222,6 +279,12 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
      process.exit(1)
    }
    verifySimulationGraph(simulationInputs)
@@ -47,6 +88,8 @@ index 4d81321..e63dca3 100755
 +  // load its render library, so fail here instead of on the device.
 +  if (item.android && opentuiPlatformInputs.size === 0)
 +    throw new Error("No @opentui/core module read process.platform: the android platform rewrite did not apply")
++  if (item.android && !heapTaggingEntry)
++    throw new Error("The android heap tagging import was not added to src/index.ts")
    await NativeArch.verify(path.join(outdir, name, "bin", item.os === "win32" ? `${binary}.exe` : binary), item.arch)
  
    await Bun.write(

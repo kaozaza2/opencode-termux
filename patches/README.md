@@ -81,6 +81,21 @@ resolver: `chunk-bun-*.js` also branches on `process.platform` to decide
 whether the renderer may use its stdin thread, and linux is the answer the rest
 of that code expects.
 
+The same patch adds a second android-only plugin that **turns off bionic heap
+pointer tagging** at startup. On arm64, Android's allocator tags every heap
+pointer in its top byte (`malloc` returns `0xb400007a…`), which puts each
+address above 2^53. `@opentui/core` takes native pointers as `u64` and refuses
+any that a JS number cannot hold, so on a real device the TUI died on its first
+native allocation with `Error: Pointer exceeds safe integer range`, while
+`--version` and `--help` worked. The plugin prepends an import to
+`src/index.ts` whose module calls
+`mallopt(M_BIONIC_SET_HEAP_TAGGING_LEVEL, M_HEAP_TAGGING_LEVEL_NONE)` through
+`bun:ffi` before anything else is imported. New allocations then come back
+untagged, and bionic still accepts frees of pointers it tagged earlier. The
+build throws if the import was not added. `termux-docker` cannot show this bug:
+it crashes earlier, on the TLSDESC problem described in
+[vendor/README.md](../vendor/README.md#it-needs-a-loader-that-implements-tlsdesc).
+
 ### `install-termux.patch` — `install`
 
 Detects Termux and appends `-android` to the npm target, so the installer
