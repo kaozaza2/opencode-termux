@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="${SCRIPT_DIR}/opencode"
 
 OPENCODE_REPO="${OPENCODE_REPO:-https://github.com/anomalyco/opencode.git}"
-OPENCODE_REF="${OPENCODE_REF:-v2.1.4}"
+OPENCODE_REF="${OPENCODE_REF:-v2.2.4}"
 
 # One target, four names. The last two differ because build.ts derives the dist
 # dir with targetName().replace("opencode","cli") and the installer resolves
@@ -169,15 +169,24 @@ CLI_INPUTS=(
   "@opentui/core/parser.worker"
   "@opentui/solid"
   "@opentui/solid/bun-plugin"
-  "@opencode-ai/pty"
   "@parcel/watcher"
   "web-tree-sitter"
   "web-tree-sitter/tree-sitter.wasm"
 )
 
+# v2.2 renamed @opencode-ai/pty to @opencode/pty; read whichever the checkout
+# depends on so older refs still build.
+pty_package() {
+  node -e '
+    const deps = require(process.argv[1]).dependencies
+    process.stdout.write(["@opencode/pty", "@opencode-ai/pty"].find((n) => n in deps) ?? "")
+  ' "${WORKDIR}/packages/cli/package.json"
+}
+
 verify_cli_inputs() {
-  local missing=0 dep
-  for dep in "${CLI_INPUTS[@]}"; do
+  local missing=0 dep pty
+  pty="$(pty_package)"
+  for dep in "${CLI_INPUTS[@]}" ${pty:+"${pty}"}; do
     if ! (cd "${WORKDIR}/packages/cli" && bun -e "Bun.resolveSync('${dep}', process.cwd())" >/dev/null 2>&1); then
       echo "  unresolved: ${dep}" >&2
       missing=1
@@ -233,15 +242,18 @@ install_workspace() {
 }
 
 # The only native deps build.ts installs with --os=* --cpu=*, which is what
-# materialises the android @opentui packages. @opencode-ai/pty (v2's
+# materialises the android @opentui packages. The pty package (v2's
 # replacement for @ff-labs/fff-bun) has no android build, which is why
 # android-target.patch skips embedding it.
 prewarm_native_deps() {
-  local core pty
+  local core pty pty_version
   core="$(bun -e 'console.log(require("./opencode/packages/cli/package.json").dependencies["@opentui/core"])')"
-  pty="$(bun -e 'console.log(require("./opencode/packages/cli/package.json").dependencies["@opencode-ai/pty"])')"
-  (cd "${WORKDIR}" && bun install --os="*" --cpu="*" "@opentui/core@${core}")
-  (cd "${WORKDIR}" && bun install --os="*" --cpu="*" "@opencode-ai/pty@${pty}")
+  pty="$(pty_package)"
+  (cd "${WORKDIR}" && bun install --os="*" --cpu="*" --libc="*" "@opentui/core@${core}")
+  if [ -n "${pty}" ]; then
+    pty_version="$(bun -e "console.log(require('./opencode/packages/cli/package.json').dependencies['${pty}'])")"
+    (cd "${WORKDIR}" && bun install --os="*" --cpu="*" --libc="*" "${pty}@${pty_version}")
+  fi
 }
 
 apply_patches() {
@@ -345,7 +357,11 @@ compile() {
     args+=(--skip-web-ui)
   fi
   echo "=== Compiling ${BUILD_TARGET} ==="
+  # v2.2 moved the filter from --target=<full name> to OPENCODE_TARGET=<name
+  # without the binary prefix> and ignores the flag, so pass both: an
+  # unfiltered run compiles all thirteen targets.
   (cd "${WORKDIR}" && OPENCODE_VERSION="${VERSION}" \
+    OPENCODE_TARGET="${BUILD_TARGET#opencode-}" \
     bun run packages/cli/script/build.ts "${args[@]}")
 }
 

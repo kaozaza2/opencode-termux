@@ -1,8 +1,8 @@
 diff --git a/packages/cli/script/build.ts b/packages/cli/script/build.ts
-index 3cac51e..e7c2cda 100755
+index 4d81321..e63dca3 100755
 --- a/packages/cli/script/build.ts
 +++ b/packages/cli/script/build.ts
-@@ -149,6 +149,26 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
+@@ -165,6 +165,26 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
        }))
      },
    }
@@ -29,17 +29,17 @@ index 3cac51e..e7c2cda 100755
    const target = targetName(item)
    const name = target.replace(binary, "cli")
    const executablePath = await compileExecutable(item)
-@@ -163,6 +183,9 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
-       opencodePtyPlugin,
+@@ -180,6 +200,9 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
        pluginRuntimePlugin,
        simulationGraphPlugin,
+       modelsSnapshot,
 +      // Every other plugin is target agnostic; this one would pin darwin and
 +      // win32 builds to linux as well.
 +      ...(item.android ? [opentuiPlatformPlugin] : []),
      ],
      external: ["node-gyp"],
      format: "esm",
-@@ -205,6 +228,10 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
+@@ -222,6 +245,10 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
      process.exit(1)
    }
    verifySimulationGraph(simulationInputs)

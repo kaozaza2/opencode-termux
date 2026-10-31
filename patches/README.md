@@ -22,7 +22,7 @@ build with its own toolchain; see `vendor/README.md`.
 v2 relocated the binary package from `packages/opencode` to `packages/cli` and
 rewrote the build script, so these patches no longer apply to a v1 checkout.
 The v1 forms touched `packages/opencode/script/build.ts`; these touch
-`packages/cli/script/build.ts`. Verified against `v2.1.4`.
+`packages/cli/script/build.ts`. Verified against `v2.2.4`.
 
 ## These patches are load-bearing
 
@@ -40,7 +40,7 @@ nothing is produced. Adds:
   and the dist directory (`cli-linux-arm64-android`, because build.ts does
   `targetName(item).replace("opencode", "cli")`).
 - two glibc-only native addons disabled for android:
-  - `resolveOpencodePty()` is skipped. `@opencode-ai/pty` (which replaced
+  - `resolveOpencodePty()` is skipped. `@opencode/pty` (`@opencode-ai/pty` before v2.2; it replaced
     `@ff-labs/fff-bun` in v2) publishes only glibc/musl builds, and exec'ing one
     on bionic fails. Skipping it makes the core fall back to `opencode-pty` on
     `PATH` — see `binary.bun.ts`, whose `resolveBinary` returns the bare name

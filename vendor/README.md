@@ -23,20 +23,20 @@ point.
 `@opentui/core` moves fast: 0.5.x had a flat renderer API (`createRenderer`,
 `render`, `imageCreateFromPixels`, ...), and 0.6.x replaced it with the `ot_*`
 Context ABI generated from `include/opentui.h`, plus audio, stream and yoga
-entry points — 345 symbols required by the 0.6.8 dlopen tables.
+entry points — 354 symbols required by the 0.8.0 dlopen tables.
 
 So **bump `@opentui/core` and rebuild this file.** To regenerate:
 
 ```bash
 ./scripts/build-libopentui.sh                 # version from the opencode checkout
-./scripts/build-libopentui.sh 0.6.8          # or explicit
+./scripts/build-libopentui.sh 0.8.0          # or explicit
 ```
 
 or in Docker, if you would rather not install a zig toolchain:
 
 ```bash
 docker build -t opentui-lib -f Dockerfile.libopentui \
-  --build-arg OPENTUI_VERSION=0.6.8 .
+  --build-arg OPENTUI_VERSION=0.8.0 .
 ```
 
 `DT_NEEDED` of a correct build looks like `libm.so`, `libc.so`, `libdl.so`.

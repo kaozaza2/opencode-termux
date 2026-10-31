@@ -5,7 +5,7 @@ set -euo pipefail
 # of OpenTUI's native Zig core that the Termux binary dlopen()s at startup.
 #
 #   ./scripts/build-libopentui.sh              # version from the opencode checkout
-#   ./scripts/build-libopentui.sh 0.6.8       # explicit @opentui/core version
+#   ./scripts/build-libopentui.sh 0.8.0       # explicit @opentui/core version
 #
 # Requires: git, curl, tar, xz, node, unzip. Zig and the NDK are downloaded.
 # Needs ~4 GB of disk for the source, the NDK, Zig and the build cache.
@@ -72,7 +72,7 @@ if [ -z "${VERSION}" ]; then
   # from the JS that loads it.
   PKG="${REPO_DIR}/opencode/packages/cli/package.json"
   if [ ! -f "${PKG}" ]; then
-    echo "ERROR: pass the @opentui/core version explicitly, e.g. $0 0.6.8" >&2
+    echo "ERROR: pass the @opentui/core version explicitly, e.g. $0 0.8.0" >&2
     echo "       (no opencode checkout at ${PKG} to read it from)" >&2
     exit 1
   fi

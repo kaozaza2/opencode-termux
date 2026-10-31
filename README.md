@@ -27,13 +27,13 @@ extract it into `$PREFIX/bin`:
 
 ```bash
 curl -fsSL \
-  https://github.com/kaozaza2/opencode-termux/releases/latest/download/opencode-termux-2.1.4.tar.gz \
+  https://github.com/kaozaza2/opencode-termux/releases/latest/download/opencode-termux-2.2.4.tar.gz \
   | tar -xz -C $PREFIX/bin
 
 opencode
 ```
 
-Swap `2.1.4` for whichever version you want.
+Swap `2.2.4` for whichever version you want.
 
 ### From a CI build artifact
 
@@ -86,7 +86,7 @@ tar -xzf opencode-termux-*.tar.gz -C $PREFIX/bin
   build with `BUILD_WEB_UI=1`.
 - **No file watcher addon.** `@parcel/watcher` has no Android build, so opencode
   falls back to `node:fs` for watching files.
-- **PTY support needs an external helper.** `@opencode-ai/pty` has no Android
+- **PTY support needs an external helper.** `@opencode/pty` has no Android
   build either. opencode will use an `opencode-pty` binary if it finds one on
   your `PATH`.
 - **Can't test the TUI in `termux-docker`.** That image ships an old Android
@@ -132,7 +132,7 @@ Set `OPENCODE_REF` to build something other than the pinned default:
 
 ```bash
 OPENCODE_REF=latest ./build.sh   # newest v2.x.y release tag
-OPENCODE_REF=v2.1.4 ./build.sh   # a specific release
+OPENCODE_REF=v2.2.4 ./build.sh   # a specific release
 OPENCODE_REF=v2 ./build.sh       # tip of the v2 branch
 ```
 
@@ -141,7 +141,7 @@ Only opencode **v2** is supported. v2 moved the CLI from `packages/opencode` to
 layout. In particular, the upstream `2.0` and `dev` branches are still v1 code,
 despite the name, and won't build.
 
-Release tags produce their own version number (`v2.1.4` becomes `2.1.4`).
+Release tags produce their own version number (`v2.2.4` becomes `2.2.4`).
 Branches get a preview version like `0.0.0-dev-<sha>`.
 
 ### Configuration
@@ -151,7 +151,7 @@ All options are environment variables:
 | Variable | Default | Description |
 | --- | --- | --- |
 | `OPENCODE_REPO` | `https://github.com/anomalyco/opencode.git` | Repository to clone |
-| `OPENCODE_REF` | `v2.1.4` | Tag, branch, or `latest` |
+| `OPENCODE_REF` | `v2.2.4` | Tag, branch, or `latest` |
 | `VERSION` | from the checkout | Version string baked into the binary |
 | `BUN_VERSION` | the version opencode pins | Bun used to compile (see below) |
 | `BUN_INSTALL_BACKEND` | `hardlink` | Set to `copyfile` if hardlinks misbehave |
